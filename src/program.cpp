@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 
+#include "platform.h"
 #include "ui.h"
 
 namespace Program
@@ -38,3 +39,13 @@ namespace Program
         error_messagebox_prefix = prefix;
     }
 }
+
+OnPC
+(
+    extern "C"
+    {
+        // This makes video drivers use best available videocard for the application.
+        __declspec(dllexport) uint32_t NvOptimusEnablement                  = 1; // For Nvidia. Docs suggest that this should have type dword, but I don't want windows headers here.
+        __declspec(dllexport) int      AmdPowerXpressRequestHighPerformance = 1; // For Amd.
+    }
+)

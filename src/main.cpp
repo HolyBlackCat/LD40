@@ -782,6 +782,8 @@ void PrecomputeLookupTexture(int size, float x_offset, std::string fname) // `si
 
 int main(int, char **)
 {
+    Events::SetErrorHandlers();
+
     Init();
 
     //Render::SetBackground(fvec3(255,157,0)/255/10);
