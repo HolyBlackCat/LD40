@@ -1266,12 +1266,31 @@ namespace Graphics
         }
     };
 
-    template <typename T, Primitive P> class RenderQueue
+    enum OverflowPolicy {flush, expand};
+
+    template <typename T, Primitive P, OverflowPolicy Policy = flush> class RenderQueue
     {
         static_assert(Reflection::Interface::field_count<T>(), "T must be reflected.");
         std::vector<T> data;
         int pos = 0;
         VertexBuffer<T> buffer;
+
+        void Overflow()
+        {
+            if constexpr (Policy == flush)
+                Draw();
+            else // expand
+            {
+                int new_size = data.size();
+                     if constexpr (P == lines) new_size /= 2;
+                else if constexpr (P == triangles) new_size /= 3;
+                new_size = new_size * 3 / 2;
+                     if constexpr (P == lines) new_size *= 2;
+                else if constexpr (P == triangles) new_size *= 3;
+                data.resize(new_size);
+                buffer.SetData(new_size, 0, stream_draw);
+            }
+        }
       public:
         RenderQueue() {}
         RenderQueue(int prim_count)
@@ -1302,25 +1321,33 @@ namespace Graphics
             return bool(buffer);
         }
 
-        void Flush()
+        void Reset()
+        {
+            pos = 0;
+        }
+        void DrawNoReset()
         {
             DebugAssert("Attempt to flush a null render queue.", buffer.Exists());
             buffer.SetDataPart(0, pos, data.data());
             buffer.Draw(P, pos);
-            pos = 0;
+        }
+        void Draw()
+        {
+            DrawNoReset();
+            Reset();
         }
         void Point(const T &a)
         {
             static_assert(P == points, "This function for point queues only.");
             if (pos + 1 > int(data.size()))
-                Flush();
+                Overflow();
             data[pos++] = a;
         }
         void Line(const T &a, const T &b)
         {
             static_assert(P == lines, "This function for line queues only.");
             if (pos + 2 > int(data.size()))
-                Flush();
+                Overflow();
             data[pos++] = a;
             data[pos++] = b;
         }
@@ -1328,7 +1355,7 @@ namespace Graphics
         {
             static_assert(P == triangles, "This function for triangle queues only.");
             if (pos + 3 > int(data.size()))
-                Flush();
+                Overflow();
             data[pos++] = a;
             data[pos++] = b;
             data[pos++] = c;

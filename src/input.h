@@ -55,10 +55,11 @@ namespace Input
       private:
         DeviceType device_type;
         DeviceID device_id;
+        ivec2 offset = ivec2(0);
 
       public:
-        Mouse(DeviceType device_type, DeviceID device_id)
-          : device_type(device_type), device_id(device_id),
+        Mouse(DeviceType device_type, DeviceID device_id, ivec2 offset = {0,0})
+          : device_type(device_type), device_id(device_id), offset(offset),
             left      {device_type, 0, 1},
             middle    {device_type, 0, 2},
             right     {device_type, 0, 3},
@@ -66,7 +67,7 @@ namespace Input
             x2        {device_type, 0, 5},
             any_button{device_type, 0, 0}
         {}
-        Mouse() : Mouse(DeviceType::mouse, 0) {}
+        Mouse(ivec2 offset = {0,0}) : Mouse(DeviceType::mouse, 0, offset) {}
 
         Key left, middle, right, x1, x2, any_button;
         [[nodiscard]] Key button(int index) const;

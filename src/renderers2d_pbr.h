@@ -1,5 +1,5 @@
-#ifndef RENDERERS2D_H_INCLUDED
-#define RENDERERS2D_H_INCLUDED
+#ifndef RENDERERS2D_PBR_H_INCLUDED
+#define RENDERERS2D_PBR_H_INCLUDED
 
 #include <utility>
 
@@ -11,30 +11,133 @@
 
 namespace Renderers
 {
-    namespace Poly2D_impl
+    namespace Poly2D_PBR_impl
     {
-        ReflectStruct(Attributes, (
-            (fvec2)(pos),
-            (fvec4)(color),
-            (fvec2)(texture_pos),
-            (fvec3)(factors),
+        ReflectStruct(AttrMain, (
+            (fvec3)(pos),
+            (fvec2)(tex_pos),
+            (fvec2)(alpha_beta),
+            (fvec4)(normal_mat),
         ))
 
-        ReflectStruct(Uniforms, (
+        ReflectStruct(UniMain, (
             (Graphics::Shader::VertexUniform<fmat4>)(matrix),
-            (Graphics::Shader::VertexUniform<fvec2>)(texture_size),
-            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
-            (Graphics::Shader::FragmentUniform<fmat4>)(color_matrix),
+            (Graphics::Shader::VertexUniform<fvec2>)(tex_size),
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(lookup),
+            (Graphics::Shader::FragmentUniform<fvec3>)(background),
+            (Graphics::Shader::FragmentUniform<float>)(emission_factor),
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(tex_albedo,tex_normal,tex_m_r_h_ao,tex_emission),
         ))
+
+        ReflectStruct(UniLight, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(tex_albedo,tex_normal,tex_m_r_h_ao,tex_depth),
+            (Graphics::Shader::VertexUniform<fvec2>)(tex_size),
+            (Graphics::Shader::VertexUniform<fmat4>)(matrix),
+            (Graphics::Shader::FragmentUniform<fvec3>)(light_pos,light_color),
+            (Graphics::Shader::FragmentUniform<float>)(light_radius),
+            (Graphics::Shader::FragmentUniform<bool>)(light_tube),
+            (Graphics::Shader::FragmentUniform<fvec3>)(light_end),
+        ))
+
+
+        ReflectStruct(AttrTex, (
+            (fvec2)(pos),
+        ))
+
+        ReflectStruct(UniExBr, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
+            (Graphics::Shader::FragmentUniform<float>)(threshold),
+        ))
+
+        ReflectStruct(UniBlur, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
+            (Graphics::Shader::FragmentUniform<fvec2>)(step),
+            (Graphics::Shader::FragmentUniform<bool>)(vertical),
+        ))
+
+        ReflectStruct(UniCopy, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
+            (Graphics::Shader::FragmentUniform<float>)(factor),
+        ))
+
+        ReflectStruct(UniFinal, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
+            (Graphics::Shader::FragmentUniform<float>)(exposure),
+        ))
+
+
+        namespace ShaderSource
+        {
+            namespace Main
+            {
+                extern const char *const v, *const f;
+            }
+            namespace Light
+            {
+                extern const char *const v, *const f;
+            }
+            namespace ExBr // Extract bright
+            {
+                extern const char *const v, *const f;
+            }
+            namespace Blur
+            {
+                extern const char *const v, *const f;
+            }
+            namespace Copy
+            {
+                extern const char *const v, *const f;
+            }
+            namespace Final
+            {
+                extern const char *const v, *const f;
+            }
+        }
     }
 
-    class Poly2D
+    class Poly2D_PBR
     {
-        Graphics::Shader shader;
-        Graphics::RenderQueue<Poly2D_impl::Attributes, Graphics::triangles> queue;
-        Poly2D_impl::Uniforms uni;
+        static constexpr int blur_passes = 4;
+
+        Graphics::Shader sh_main;
+        Graphics::Shader sh_light;
+        Graphics::Shader sh_exbr;
+        Graphics::Shader sh_blur;
+        Graphics::Shader sh_copy;
+        Graphics::Shader sh_final;
+        Poly2D_PBR_impl::UniMain  uni_main;
+        Poly2D_PBR_impl::UniLight uni_light;
+        Poly2D_PBR_impl::UniExBr  uni_exbr;
+        Poly2D_PBR_impl::UniBlur  uni_blur;
+        Poly2D_PBR_impl::UniCopy  uni_copy;
+        Poly2D_PBR_impl::UniFinal uni_final;
+
+        Graphics::Texture tex_framebuffer_hdr;
+        Graphics::Texture tex_framebuffer_hdr_depth;
+        Graphics::FrameBuffer framebuffer_hdr;
+        Graphics::FrameBuffer framebuffer_hdr_color;
+        Graphics::Texture tex_framebuffer_bloom1;
+        Graphics::Texture tex_framebuffer_bloom2;
+        Graphics::FrameBuffer framebuffer_bloom1;
+        Graphics::FrameBuffer framebuffer_bloom2;
+
+        Graphics::RenderQueue<Poly2D_PBR_impl::AttrMain, Graphics::triangles, Graphics::expand> queue;
 
         const Graphics::CharMap *ch_map = 0;
+
+        static void FullscreenQuad()
+        {
+            static Graphics::VertexBuffer<Poly2D_PBR_impl::AttrTex> vbuf;
+            static bool first = 1;
+            if (first)
+            {
+                first = 0;
+                vbuf.Create();
+                Poly2D_PBR_impl::AttrTex arr[]{{{-1,-1}},{{-1,10}},{{10,-1}}};
+                vbuf.SetData(3, arr);
+            }
+            vbuf.Draw(Graphics::triangles);
+        }
 
       public:
         class Quad_t : TemplateUtils::MoveFunc<Quad_t>
@@ -42,8 +145,9 @@ namespace Renderers
             using ref = Quad_t &&;
 
             // The constructor sets those:
-            decltype(Poly2D::queue) *queue;
+            decltype(Poly2D_PBR::queue) *queue;
             fvec2 m_pos, m_size;
+            float m_depth;
 
             bool has_texture = 0;
             fvec2 m_tex_pos = fvec2(0), m_tex_size = fvec2(0);
@@ -54,12 +158,6 @@ namespace Renderers
 
             bool has_matrix = 0;
             fmat3 m_matrix = fmat3::identity();
-
-            bool has_color = 0;
-            fvec3 m_colors[4] {};
-
-            bool has_tex_color_fac = 0;
-            float m_tex_color_factors[4] = {1,1,1,1};
 
             float m_alpha[4] = {1,1,1,1};
             float m_beta[4] = {1,1,1,1};
@@ -74,7 +172,7 @@ namespace Renderers
                 from.queue = 0;
             }
           public:
-            Quad_t(decltype(Poly2D::queue) *queue, fvec2 pos, fvec2 size) : queue(queue), m_pos(pos), m_size(size) {}
+            Quad_t(decltype(Poly2D_PBR::queue) *queue, fvec2 pos, float d, fvec2 size) : queue(queue), m_pos(pos), m_size(size), m_depth(d) {}
 
             Quad_t(const Quad_t &) = delete;
             Quad_t &operator=(const Quad_t &) = delete;
@@ -87,48 +185,31 @@ namespace Renderers
                 if (!queue)
                     return;
 
-                DebugAssert("2D poly renderer: Quad with no texture nor color specified.", has_texture || has_color);
-                DebugAssert("2D poly renderer: Quad with absolute corner coodinates with a center specified.", m_abs_pos + has_center < 2);
-                DebugAssert("2D poly renderer: Quad with absolute texture coordinates mode but no texture coordinates specified.", m_abs_tex_pos <= has_texture);
-                DebugAssert("2D poly renderer: Quad with texture and color, but without a mixing factor.", (has_texture && has_color) == has_tex_color_fac);
-                DebugAssert("2D poly renderer: Quad with a matrix but without a center specified.", has_matrix <= has_center);
-                DebugAssert("2D poly renderer: Quad with a center position specified in texels but without a texture.", m_center_pos_tex <= has_texture);
+                DebugAssert("2D poly PBR: Quad with no texture nor color specified.", has_texture);
+                DebugAssert("2D poly PBR: Quad with absolute corner coodinates with a center specified.", m_abs_pos + has_center < 2);
+                DebugAssert("2D poly PBR: Quad with absolute texture coordinates mode but no texture coordinates specified.", m_abs_tex_pos <= has_texture);
+                DebugAssert("2D poly PBR: Quad with a matrix but without a center specified.", has_matrix <= has_center);
 
                 if (m_abs_pos)
                     m_size -= m_pos;
                 if (m_abs_tex_pos)
                     m_tex_size -= m_tex_pos;
 
-                Poly2D_impl::Attributes out[4];
-
-                if (has_texture)
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        out[i].color = m_colors[i].to_vec4(0);
-                        out[i].factors.x = m_tex_color_factors[i];
-                        out[i].factors.y = m_alpha[i];
-                    }
-
-                    if (m_center_pos_tex)
-                    {
-                        if (m_tex_size.x)
-                            m_center.x *= m_size.x / m_tex_size.x;
-                        if (m_tex_size.y)
-                            m_center.y *= m_size.y / m_tex_size.y;
-                    }
-                }
-                else
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        out[i].color = m_colors[i].to_vec4(m_alpha[i]);
-                        out[i].factors.x = out[i].factors.y = 0;
-                    }
-                }
+                Poly2D_PBR_impl::AttrMain out[4];
 
                 for (int i = 0; i < 4; i++)
-                    out[i].factors.z = m_beta[i];
+                {
+                    out[i].alpha_beta.x = m_alpha[i];
+                    out[i].alpha_beta.y = m_beta[i];
+                }
+
+                if (m_center_pos_tex)
+                {
+                    if (m_tex_size.x)
+                        m_center.x *= m_size.x / m_tex_size.x;
+                    if (m_tex_size.y)
+                        m_center.y *= m_size.y / m_tex_size.y;
+                }
 
                 if (m_flip_x)
                 {
@@ -145,30 +226,42 @@ namespace Renderers
                         m_center.y = m_size.y - m_center.y;
                 }
 
-                out[0].pos = -m_center;
-                out[2].pos = m_size - m_center;
-                out[1].pos = {out[0].pos.x, out[2].pos.y};
-                out[3].pos = {out[2].pos.x, out[0].pos.y};
+                out[0].pos = (-m_center).to_vec3(m_depth);
+                out[2].pos = (m_size - m_center).to_vec3(m_depth);
+                out[1].pos = fvec2(out[0].pos.x, out[2].pos.y).to_vec3(m_depth);
+                out[3].pos = fvec2(out[2].pos.x, out[0].pos.y).to_vec3(m_depth);
+
+                fmat2 nm;
 
                 if (has_matrix)
                 {
                     for (auto &it : out)
-                        it.pos = m_pos + (m_matrix /mul/ it.pos.to_vec3(1)).to_vec2();
+                        it.pos = m_pos.to_vec3(0) + (m_matrix /mul/ it.pos.set_z(1)).set_z(0);
+                    nm = m_matrix.to_mat2().inverse().transpose();
                 }
                 else
                 {
                     for (auto &it : out)
-                        it.pos += m_pos;
+                        it.pos += m_pos.to_vec3(0);
+                    nm = fmat2::identity();
                 }
 
-                out[0].texture_pos = m_tex_pos;
-                out[2].texture_pos = m_tex_pos + m_tex_size;
-                out[1].texture_pos = {out[0].texture_pos.x, out[2].texture_pos.y};
-                out[3].texture_pos = {out[2].texture_pos.x, out[0].texture_pos.y};
+                out[0].tex_pos = m_tex_pos;
+                out[2].tex_pos = m_tex_pos + m_tex_size;
+                out[1].tex_pos = {out[0].tex_pos.x, out[2].tex_pos.y};
+                out[3].tex_pos = {out[2].tex_pos.x, out[0].tex_pos.y};
+
+                for (auto &it : out)
+                    it.normal_mat = (fvec4 &)nm;
 
                 queue->Quad(out[0], out[1], out[2], out[3]);
             }
 
+            ref depth(float d)
+            {
+                m_depth = d;
+                return (ref)*this;
+            }
             ref tex(ivec2 pos, ivec2 size)
             {
                 tex_f(pos, size);
@@ -267,46 +360,6 @@ namespace Renderers
                 scale_f(fvec2(s));
                 return (ref)*this;
             }
-            ref color(fvec3 c)
-            {
-                DebugAssert("2D poly renderer: Quad_t color specified twice.", !has_color);
-                has_color = 1;
-
-                for (auto &it : m_colors)
-                    it = c;
-                return (ref)*this;
-            }
-            ref color(fvec3 a, fvec3 b, fvec3 c, fvec3 d)
-            {
-                DebugAssert("2D poly renderer: Quad_t color specified twice.", !has_color);
-                has_color = 1;
-
-                m_colors[0] = a;
-                m_colors[1] = b;
-                m_colors[2] = c;
-                m_colors[3] = d;
-                return (ref)*this;
-            }
-            ref mix(float x) // 0 - fill with color, 1 - use texture
-            {
-                DebugAssert("2D poly renderer: Quad_t texture/color factor specified twice.", !has_tex_color_fac);
-                has_tex_color_fac = 1;
-
-                for (auto &it : m_tex_color_factors)
-                    it = x;
-                return (ref)*this;
-            }
-            ref mix(float a, float b, float c, float d)
-            {
-                DebugAssert("2D poly renderer: Quad_t texture/color factor specified twice.", !has_tex_color_fac);
-                has_tex_color_fac = 1;
-
-                m_tex_color_factors[0] = a;
-                m_tex_color_factors[1] = b;
-                m_tex_color_factors[2] = c;
-                m_tex_color_factors[3] = d;
-                return (ref)*this;
-            }
             ref alpha(float a)
             {
                 for (auto &it : m_alpha)
@@ -356,12 +409,13 @@ namespace Renderers
                 return (ref)*this;
             }
         };
+        #if 0
         class Triangle_t : TemplateUtils::MoveFunc<Triangle_t>
         {
             using ref = Triangle_t &&;
 
             // The constructor sets those:
-            decltype(Poly2D::queue) *queue;
+            decltype(Poly2D_PBR::queue) *queue;
             fvec2 m_pos, m_vectices[3];
 
             bool has_texture = 0;
@@ -384,7 +438,7 @@ namespace Renderers
                 from.queue = 0;
             }
           public:
-            Triangle_t(decltype(Poly2D::queue) *queue, fvec2 pos, fvec2 a, fvec2 b, fvec2 c) : queue(queue), m_pos(pos), m_vectices{a, b, c} {}
+            Triangle_t(decltype(Poly2D_PBR::queue) *queue, fvec2 pos, fvec2 a, fvec2 b, fvec2 c) : queue(queue), m_pos(pos), m_vectices{a, b, c} {}
 
             Triangle_t(const Triangle_t &) = delete;
             Triangle_t &operator=(const Triangle_t &) = delete;
@@ -400,7 +454,7 @@ namespace Renderers
                 DebugAssert("2D poly renderer: Triangle with no texture nor color specified.", has_texture || has_color);
                 DebugAssert("2D poly renderer: Triangle with texture and color, but without a mixing factor.", (has_texture && has_color) == has_tex_color_fac);
 
-                Poly2D_impl::Attributes out[3];
+                Poly2D_PBR_impl::Attributes out[3];
 
                 if (has_texture)
                 {
@@ -423,7 +477,7 @@ namespace Renderers
                 for (int i = 0; i < 3; i++)
                 {
                     out[i].factors.z = m_beta[i];
-                    out[i].texture_pos = m_tex_pos[i];
+                    out[i].tex_pos = m_tex_pos[i];
                 }
 
                 if (has_matrix)
@@ -586,7 +640,7 @@ namespace Renderers
             using ref = Text_t &&;
 
             // The constructor sets those:
-            decltype(Poly2D::queue) *queue;
+            decltype(Poly2D_PBR::queue) *queue;
             const Graphics::CharMap *m_ch_map;
             fvec2 m_pos;
             std::string_view m_str;
@@ -643,7 +697,7 @@ namespace Renderers
             }
 
           public:
-            Text_t(decltype(Poly2D::queue) *queue, const Graphics::CharMap *ch_map, fvec2 pos, std::string_view str) : queue(queue), m_ch_map(ch_map), m_pos(pos), m_str(str) {}
+            Text_t(decltype(Poly2D_PBR::queue) *queue, const Graphics::CharMap *ch_map, fvec2 pos, std::string_view str) : queue(queue), m_ch_map(ch_map), m_pos(pos), m_str(str) {}
 
             Text_t(const Text_t &) = delete;
             Text_t &operator=(const Text_t &) = delete;
@@ -765,107 +819,185 @@ namespace Renderers
                 return (ref)*this;
             }
         };
+        #endif
 
-        Poly2D() {}
-        Poly2D(int size, const Graphics::Shader::Config &cfg = {})
+        Poly2D_PBR() {}
+        Poly2D_PBR(ivec2 scr, int size, const Graphics::Texture &lut)
         {
-            Create(size, cfg);
+            Create(scr, size, lut);
         }
-        Poly2D(int size, const std::string &v_src, const std::string &f_src, const Graphics::Shader::Config &cfg = {})
+        void Create(ivec2 scr, int size, const Graphics::Texture &lut)
         {
-            Create(size, v_src, f_src, cfg);
-        }
-        void Create(int size, const Graphics::Shader::Config &cfg = {})
-        {
-            constexpr const char *v = R"(
-VARYING( vec4 , color       )
-VARYING( vec2 , texture_pos )
-VARYING( vec3 , factors     )
-void main()
-{
-    gl_Position = u_matrix * vec4(a_pos, 0, 1);
-    v_color       = a_color;
-    v_texture_pos = a_texture_pos / u_texture_size;
-    v_factors     = a_factors;
-})";
-            constexpr const char *f = R"(
-VARYING( vec4 , color       )
-VARYING( vec2 , texture_pos )
-VARYING( vec3 , factors     )
-void main()
-{
-    vec4 tex_color = texture2D(u_texture, v_texture_pos);
-    gl_FragColor = vec4(v_color.rgb * (1. - v_factors.x) + tex_color.rgb * v_factors.x,
-                        v_color.a   * (1. - v_factors.y) + tex_color.a   * v_factors.y);
-    vec4 result = u_color_matrix * vec4(gl_FragColor.rgb, 1);
-    gl_FragColor.a *= result.a;
-    gl_FragColor.rgb = result.rgb * gl_FragColor.a;
-    gl_FragColor.a *= v_factors.z;
-})";
-            Create(size, v, f, cfg);
-        }
-        void Create(int size, const std::string &v_src, const std::string &f_src, const Graphics::Shader::Config &cfg = {}) // With custom shader.
-        {
-            decltype(shader) new_shader;
-            new_shader.Create<Poly2D_impl::Attributes>("2D renderer", v_src, f_src, &uni, cfg);
-            decltype(queue) new_queue(size);
-            shader = std::move(new_shader);
-            queue  = std::move(new_queue);
+            queue.Create(size);
 
+            sh_main .Create<Poly2D_PBR_impl::AttrMain>("PBR main" , Poly2D_PBR_impl::ShaderSource::Main ::v, Poly2D_PBR_impl::ShaderSource::Main ::f, &uni_main );
+            sh_light.Create<Poly2D_PBR_impl::AttrMain>("PBR light", Poly2D_PBR_impl::ShaderSource::Light::v, Poly2D_PBR_impl::ShaderSource::Light::f, &uni_light);
+            sh_exbr .Create<Poly2D_PBR_impl::AttrTex >("PBR exbr" , Poly2D_PBR_impl::ShaderSource::ExBr ::v, Poly2D_PBR_impl::ShaderSource::ExBr ::f, &uni_exbr );
+            sh_blur .Create<Poly2D_PBR_impl::AttrTex >("PBR blur" , Poly2D_PBR_impl::ShaderSource::Blur ::v, Poly2D_PBR_impl::ShaderSource::Blur ::f, &uni_blur );
+            sh_copy .Create<Poly2D_PBR_impl::AttrTex >("PBR copy" , Poly2D_PBR_impl::ShaderSource::Copy ::v, Poly2D_PBR_impl::ShaderSource::Copy ::f, &uni_copy );
+            sh_final.Create<Poly2D_PBR_impl::AttrTex >("PBR final", Poly2D_PBR_impl::ShaderSource::Final::v, Poly2D_PBR_impl::ShaderSource::Final::f, &uni_final);
+            uni_main.lookup = lut;
             SetMatrix(fmat4::identity());
-            ResetColorMatrix();
+
+            tex_framebuffer_hdr.Create();
+            tex_framebuffer_hdr.SetData(GL_RGB16F, GL_RGB, GL_UNSIGNED_BYTE, scr);
+            tex_framebuffer_hdr.Interpolation(Graphics::Texture::linear);
+            tex_framebuffer_hdr_depth.Create();
+            tex_framebuffer_hdr_depth.SetData(GL_R32F, GL_RGB, GL_UNSIGNED_BYTE, scr);
+            tex_framebuffer_hdr_depth.Interpolation(Graphics::Texture::linear);
+            framebuffer_hdr.Create();
+            framebuffer_hdr.Attach({tex_framebuffer_hdr, tex_framebuffer_hdr_depth});
+            framebuffer_hdr.Unbind();
+            framebuffer_hdr_color.Create();
+            framebuffer_hdr_color.Attach(tex_framebuffer_hdr);
+            framebuffer_hdr_color.Unbind();
+
+            for (auto it : {&tex_framebuffer_bloom1, &tex_framebuffer_bloom2})
+            {
+                it->Create();
+                it->SetData(GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, scr);
+                it->Interpolation(Graphics::Texture::linear);
+                it->Wrap(Graphics::Texture::clamp);
+            }
+            framebuffer_bloom1.Create();
+            framebuffer_bloom2.Create();
+            framebuffer_bloom1.Attach(tex_framebuffer_bloom1);
+            framebuffer_bloom2.Attach(tex_framebuffer_bloom2);
+
+            uni_main.emission_factor = 10;
+
+            uni_light.tex_depth = tex_framebuffer_hdr_depth;
+
+            uni_exbr.texture = tex_framebuffer_hdr;
+            uni_exbr.threshold = 1.1;
+
+            uni_blur.step = 1. / scr;
+
+            uni_copy.texture = tex_framebuffer_bloom1;
+            uni_copy.factor = 0.05;
+
+            uni_final.texture = tex_framebuffer_hdr;
+            uni_final.exposure = 0;
         }
+        /*
         void Destroy()
         {
             shader.Destroy();
             queue.Destroy();
+        }*/
+
+        void DrawAmbient()
+        {
+            Graphics::Blending::Enable();
+            sh_main.Bind();
+            framebuffer_hdr.Bind();
+            Graphics::Clear(Graphics::color);
+            queue.DrawNoReset();
+            framebuffer_hdr_color.Bind();
+            sh_light.Bind();
         }
 
-        void Finish() // Binds the shader.
+        void PointLight(fvec3 color, fvec3 pos, float rad = 0)
         {
-            shader.Bind();
-            queue.Draw();
+            uni_light.light_pos = pos;
+            uni_light.light_color = color;
+            uni_light.light_radius = rad;
+            uni_light.light_tube = 0;
+            queue.DrawNoReset();
+        }
+        void LineLight(fvec3 color, fvec3 a, fvec3 b, float rad = 0)
+        {
+            uni_light.light_pos = a;
+            uni_light.light_end = b;
+            uni_light.light_color = color;
+            uni_light.light_radius = rad;
+            uni_light.light_tube = 1;
+            queue.DrawNoReset();
         }
 
-        void SetMatrix(fmat4 m) // Binds the shader, flushes the queue.
+        void DrawFinal()
         {
-            Finish();
-            uni.matrix = m;
+            queue.Reset();
+
+            Graphics::Blending::Disable();
+
+            framebuffer_bloom1.Bind();
+            sh_exbr.Bind();
+            FullscreenQuad();
+
+            sh_blur.Bind();
+
+            #if 0 // Render bloom only
+            framebuffer_hdr.Bind();
+            Graphics::Clear(Graphics::color);
+            #endif
+
+            for (int i = 0; i < blur_passes; i++)
+            {
+                framebuffer_bloom2.Bind();
+                uni_blur.vertical = 0;
+                uni_blur.texture = tex_framebuffer_bloom1;
+                FullscreenQuad();
+
+                framebuffer_bloom1.Bind();
+                uni_blur.vertical = 1;
+                uni_blur.texture = tex_framebuffer_bloom2;
+                FullscreenQuad();
+
+                Graphics::Blending::Enable();
+                framebuffer_hdr.Bind();
+                sh_copy.Bind();
+                FullscreenQuad();
+                Graphics::Blending::Disable();
+            }
+
+            Graphics::FrameBuffer::Unbind();
+
+            sh_final.Bind();
+
+            FullscreenQuad();
         }
 
-        // final_color = (color_matrix * vec4(color.rgb,1)) * vec4(1,1,1,color.a)
-        void SetColorMatrix(fmat4 m) // Binds the shader, flushes the queue.
+        void SetMatrix(fmat4 m) // Binds a shader. Only the last call has effect for each frame.
         {
-            Finish();
-            uni.color_matrix = m;
+            uni_main.matrix = m;
+            uni_light.matrix = m;
         }
-        void ResetColorMatrix() // Binds the shader, flushes the queue.
+        void SetBackground(fvec3 c) // Binds a shader. Only the last call has effect for each frame.
         {
-            Finish();
-            uni.color_matrix = fmat4::identity();
+            uni_main.background = c;
         }
 
-        void SetTexture(const Graphics::Texture &texture) // Binds the shader, flushes the queue.
+        void SetTextures(const Graphics::Texture &tex_albedo,
+                         const Graphics::Texture &tex_normal,
+                         const Graphics::Texture &tex_m_r_h_ao,
+                         const Graphics::Texture &tex_emission) // Binds a shader. Only the last call has effect for each frame.
         {
-            Finish();
-            uni.texture = texture;
-            uni.texture_size = texture.Size();
+            uni_main.tex_size = tex_albedo.Size();
+            uni_main.tex_albedo   = tex_albedo;
+            uni_main.tex_normal   = tex_normal;
+            uni_main.tex_m_r_h_ao = tex_m_r_h_ao;
+            uni_main.tex_emission = tex_emission;
+            uni_light.tex_size = tex_albedo.Size();
+            uni_light.tex_albedo   = tex_albedo;
+            uni_light.tex_normal   = tex_normal;
+            uni_light.tex_m_r_h_ao = tex_m_r_h_ao;
         }
-        void SetTexture(const Graphics::Texture &&) = delete;
 
         void SetDefaultFont(const Graphics::CharMap &map)
         {
             ch_map = &map;
         }
 
-        Quad_t Quad(ivec2 pos, ivec2 size)
+        Quad_t Quad(ivec2 pos, float d, ivec2 size)
         {
-            return {&queue, pos, size};
+            return {&queue, pos, d, size};
         }
-        Quad_t Quad_f(fvec2 pos, fvec2 size)
+        Quad_t Quad_f(fvec2 pos, float d, fvec2 size)
         {
-            return {&queue, pos, size};
+            return {&queue, pos, d, size};
         }
+        #if 0
         Triangle_t Triangle(ivec2 pos, ivec2 a, ivec2 b, ivec2 c)
         {
             return {&queue, pos, a, b, c};
@@ -882,6 +1014,7 @@ void main()
         {
             return {&queue, ch_map, pos, str};
         }
+        #endif
     };
 }
 

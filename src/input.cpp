@@ -68,7 +68,7 @@ namespace Input
 
     ivec2 Mouse::pos() const
     {
-        return Events::Input::Vector(device_type, device_id, Events::Input::vec_mouse_pos);
+        return Events::Input::Vector(device_type, device_id, Events::Input::vec_mouse_pos) - offset;
     }
     ivec2 Mouse::rel_pos() const
     {
