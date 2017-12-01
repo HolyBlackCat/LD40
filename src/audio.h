@@ -3,12 +3,12 @@
 
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <unordered_set>
 #include <utility>
 
 #include <AL/al.h>
-#include <AL/alc.h>
 #include <AL/alc.h>
 #include <vorbis/vorbisfile.h>
 
@@ -21,6 +21,9 @@ namespace Audio
     //{ Exceptions
     DefineExceptionBase(exception)
 
+    DefineExceptionInline(cant_init_al, :exception, "Unable to initialize OpenAL.",
+        (std::string,reason,"Reason")
+    )
     DefineExceptionInline(wrong_format, :exception, "Wrong audio format.",
         (std::string,type,"Expected")
     )
@@ -35,38 +38,120 @@ namespace Audio
     DefineExceptionInline(cant_create_al_resource, :exception, "Can't create an OpenAL resource.",
         (std::string,type,"Type")
     )
+    DefineExceptionInline(al_error, :exception, "OpenAL error.",
+            (std::string,message,"Message")
+        )
     //}
 
-    // Those settings are global for all audio objects.
+    class Context // The only context is ref-counted.
+    {
+        inline static int ref_count = 0;
+        inline static ALCdevice *device = 0;
+        inline static ALCcontext *context = 0;
+
+      public:
+        Context()
+        {
+            if (ref_count != 0)
+                return;
+            device = alcOpenDevice(0);
+            if (!device)
+                throw cant_init_al("Unable to create OpenAL device.");
+            ALCint major, minor;
+            alcGetIntegerv(device, ALC_MAJOR_VERSION, 1, &major);
+            alcGetIntegerv(device, ALC_MINOR_VERSION, 1, &minor);
+            if (major * 1000 + minor < 1001)
+            {
+                alcCloseDevice(device);
+                throw cant_init_al("OpenAL dynamic library has to be at least 1.1.");
+            }
+            context = alcCreateContext(device, 0);
+            if (!context)
+            {
+                alcCloseDevice(device);
+                throw cant_init_al("Unable to create OpenAL context.");
+            }
+            if (!alcMakeContextCurrent(context))
+            {
+                alcDestroyContext(context);
+                alcCloseDevice(device);
+                throw cant_init_al("Can't enable OpenAL context.");
+            }
+            ref_count++;
+        }
+        Context(const Context &) : Context() {}
+        ~Context()
+        {
+            if (--ref_count != 0)
+                return;
+            if (context)
+            {
+                alcDestroyContext(context);
+                context = 0;
+            }
+            if (device)
+            {
+                alcCloseDevice(device);
+                device = 0;
+            }
+        }
+
+        void CheckErrors() const
+        {
+            switch (alcGetError(device))
+            {
+                case 0: return;
+                case ALC_INVALID_DEVICE:  throw al_error("Invalid device.");
+                case ALC_INVALID_CONTEXT: throw al_error("Invalid context.");
+                case ALC_INVALID_ENUM:    throw al_error("Invalid enum.");
+                case ALC_INVALID_VALUE:   throw al_error("Invalid value.");
+                case ALC_OUT_OF_MEMORY:   throw al_error("Out of memory.");
+                default:                  throw al_error("Unknown error.");
+            }
+        }
+
+        static bool Exists()
+        {
+            return context;
+        }
+    };
+
     inline void Volume(float vol)
     {
+        DebugAssert("Attempt to use a null AL context.", Context::Exists());
         alListenerf(AL_GAIN, vol);
     }
     inline void Pitch(float pitch)
     {
+        DebugAssert("Attempt to use a null AL context.", Context::Exists());
         alListenerf(AL_PITCH, pitch);
     }
 
-    inline void ListenerPos(const fvec3 &v)
+    inline void ListenerPos(fvec3 v)
 	{
+	    DebugAssert("Attempt to use a null AL context.", Context::Exists());
 		alListenerfv(AL_POSITION, v.as_array());
 	}
-	inline void ListenerVelocity(const fvec3 &v)
+	inline void ListenerVel(fvec3 v)
 	{
+	    DebugAssert("Attempt to use a null AL context.", Context::Exists());
 		alListenerfv(AL_VELOCITY, v.as_array());
 	}
-	inline void ListenerRot(const fvec3 &forw, const fvec3 &up)
+	inline void ListenerRot(fvec3 fwd, fvec3 up)
 	{
-		fvec3 arr[2] = {forw, up};
+	    DebugAssert("Attempt to use a null AL context.", Context::Exists());
+		fvec3 arr[2] = {fwd, up};
 		alListenerfv(AL_ORIENTATION, (float *)arr);
 	}
 
     inline void DopplerFactor(float n)
     {
+        DebugAssert("Attempt to use a null AL context.", Context::Exists());
         alDopplerFactor(n);
     }
 	inline void SpeedOfSound(float n)
 	{
+	    DebugAssert("Attempt to use a null AL context.", Context::Exists());
 	    alSpeedOfSound(n);
     }
 
@@ -466,14 +551,31 @@ namespace Audio
         }
     };
 
+
+    class Source;
+
     class Buffer
     {
+        friend class Source;
+
         class HandleFuncs
         {
             template <typename> friend class ::Utils::Handle;
-            static ALuint Create() {ALuint value; alGenBuffers(1, &value); return value;}
-            static void Destroy(ALuint value) {alDeleteBuffers(1, &value);}
-            static void Error() {throw cant_create_al_resource("Buffer");}
+            static ALuint Create()
+            {
+                DebugAssert("Attempt to use a null AL context.", Context::Exists());
+                ALuint value;
+                alGenBuffers(1, &value);
+                return value;
+            }
+            static void Destroy(ALuint value)
+            {
+                alDeleteBuffers(1, &value);
+            }
+            static void Error()
+            {
+                throw cant_create_al_resource("Buffer");
+            }
         };
         using Handle_t = Utils::Handle<HandleFuncs>;
         Handle_t handle;
@@ -505,13 +607,16 @@ namespace Audio
         {
             SetData(data.Format(), data.Frequency(), data.Bytes(), data.Data());
         }
+
+        Source operator()(float volume = 1, float pitch = 1) const; // Creates a temporary source to play the sound.
     };
 
-    class SourceList;
 
     class Source
     {
-        friend class SourceList;
+        inline static float default_ref_dist = 1,
+                            default_rolloff_fac = 1,
+                            default_max_dist = std::numeric_limits<float>::infinity();
 
         class Object
         {
@@ -519,9 +624,13 @@ namespace Audio
           public:
             Object()
             {
+                DebugAssert("Attempt to use a null AL context.", Context::Exists());
                 alGenSources(1, &handle);
                 if (!handle)
                     throw cant_create_al_resource("Buffer");
+                alSourcef(*this, AL_REFERENCE_DISTANCE, default_ref_dist);
+                alSourcef(*this, AL_ROLLOFF_FACTOR,     default_rolloff_fac);
+                alSourcef(*this, AL_MAX_DISTANCE,       default_max_dist);
             }
             Object(const Object &) = delete;
             Object &operator=(const Object &) = delete;
@@ -534,11 +643,14 @@ namespace Audio
             {
                 return handle;
             }
-
-            std::unordered_set<std::shared_ptr<Source>> *set;
         };
 
         std::shared_ptr<Object> object;
+        inline static std::unordered_set<std::shared_ptr<Object>> list;
+
+        bool temp = 0;
+
+        using ref = Source &&;
 
       public:
         Source() {}
@@ -547,46 +659,168 @@ namespace Audio
         Source(Source &&o) = default;
         Source &operator=(Source &&o) = default;
 
-        void Create(SourceList &list);
-        void Destroy();
+        ~Source()
+        {
+            if (Exists() && temp)
+            {
+                int looping;
+                alGetSourcei(*object, AL_LOOPING, &looping);
+                if (looping)
+                    return;
+                play();
+                list.insert(object);
+            }
+        }
+
+        static void Tick()
+        {
+            auto it = list.begin();
+
+            while (it != list.end())
+            {
+                int state;
+                alGetSourcei(**it, AL_SOURCE_STATE, &state);
+                if (state != AL_PLAYING)
+                    it = list.erase(it);
+                else
+                    it++;
+            }
+        }
+
+
+        void Create(const Buffer &buffer)
+        {
+            if (Exists())
+                return;
+            object = std::make_shared<Object>();
+            temp = 0;
+            alSourcei(*object, AL_BUFFER, *buffer.handle);
+        }
+        void Destroy()
+        {
+            object.reset();
+        }
         bool Exists() const
         {
             return bool(object);
         }
 
-        #error make functions here
+        /* The volume curve is a hyperbola, clamped at 1 (if `distance` < `ref`).
+         *             /                   1                \
+         * volume = min| 1 , ------------------------------ |
+         *             \     1 + fac * (distance * ref - 1) /
+         * `distance` is clamped at `max`.
+         */
+
+        static void DefaultMaxDistance(float d)
+        {
+            default_max_dist = d;
+        }
+        static void DefaultRefDistance(float d)
+        {
+            default_ref_dist = d;
+        }
+        static void DefaultRolloffFactor(float f)
+        {
+            default_rolloff_fac = f;
+        }
+
+
+        ref max_distance(float d)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcef(*object, AL_MAX_DISTANCE, d);
+            return (ref)*this;
+        }
+        ref ref_distance(float d)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcef(*object, AL_REFERENCE_DISTANCE, d);
+            return (ref)*this;
+        }
+        ref rolloff_factor(float f)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcef(*object, AL_ROLLOFF_FACTOR, f);
+            return (ref)*this;
+        }
+
+        ref temporary() // Doesn't work for looped sounds. Plays the sound after the object is destroyed.
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            temp = 1;
+            return (ref)*this;
+        }
+
+        ref volume(float v)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcef(*object, AL_GAIN, v);
+            return (ref)*this;
+        }
+        ref pitch(float v)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcef(*object, AL_PITCH, v);
+            return (ref)*this;
+        }
+        ref loop(float l)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcei(*object, AL_LOOPING, l);
+            return (ref)*this;
+        }
+
+        ref play()
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcePlay(*object);
+            return (ref)*this;
+        }
+        ref stop()
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourceStop(*object);
+            return (ref)*this;
+        }
+
+        // All functions below do not work for stereo sources.
+
+        ref pos(fvec3 p)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcefv(*object, AL_POSITION, p.as_array());
+            return (ref)*this;
+        }
+        ref vel(fvec3 v)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcefv(*object, AL_VELOCITY, v.as_array());
+            return (ref)*this;
+        }
+        ref relative(bool r = 1)
+        {
+            DebugAssert("Attempt to use a null audio source.", Exists());
+            alSourcei(*object, AL_SOURCE_RELATIVE, r);
+            return (ref)*this;
+        }
+
+        ref pos(fvec2 p)
+        {
+            return (ref)pos(p.to_vec3());
+        }
+        ref vel(fvec2 p)
+        {
+            return (ref)vel(p.to_vec3());
+        }
     };
 
-    class SourceList
+    inline Source Buffer::operator()(float volume, float pitch) const // Creates a temporary source to play the sound.
     {
-        std::unordered_set<std::shared_ptr<Source>> set;
-      public:
-        SourceList()
-        {
-            #error make me
-        }
-        void Tick()
-        {
-            #error make me
-            #error remove unused sources here
-        }
-    };
-
-    inline void Source::Create(SourceList &list)
-    {
-        if (Exists())
-            Destroy();
-        Object new_object = std::make_shared<Object>();
-        new_object->set = &list;
-        list.set.insert(new_object);
-        object = new_object;
-    }
-    inline void Source::Destroy()
-    {
-        if (!Exists())
-            return;
-        object->set.erase(object);
-        object.reset();
+        Source src;
+        src.Create(*this);
+        src.temporary().volume(volume).pitch(pitch);
+        return src;
     }
 }
 

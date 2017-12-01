@@ -172,6 +172,7 @@ Graphics::VertexBuffer<AttributesMain> LoadModel(Utils::MemoryFile file)
 }
 
 Window win;
+Audio::Context audio_con;
 Graphics::Shader shader_main;
 Graphics::Shader shader_add_light;
 Graphics::Shader shader_extract_bright;
@@ -784,6 +785,8 @@ int main(int, char **)
 {
     Events::SetErrorHandlers();
 
+    Audio::Buffer sound(Audio::Sound::WAV("test.wav"));
+
     Init();
 
     //Render::SetBackground(fvec3(255,157,0)/255/10);
@@ -800,12 +803,19 @@ int main(int, char **)
     fvec2 rot(2.18,0.56);
     float roll = 0;
 
+    Audio::ListenerPos({400,300,600});
+    Audio::ListenerRot({0,0,-1},{0,1,0});
+    Audio::Source::DefaultRefDistance(400);
+
     while (1)
     {
         Events::Process();
+        Audio::Source::Tick();
 
         if (Input::Keys::f11.pressed())
             win.ToggleFullscreen();
+        if (Input::Keys::space.pressed())
+            sound().pos(mouse.pos());
 
         rot += fvec2(Input::Keys::arrow_right.down() - Input::Keys::arrow_left.down(),
                      Input::Keys::arrow_up.down() - Input::Keys::arrow_down.down()) * 0.02;
