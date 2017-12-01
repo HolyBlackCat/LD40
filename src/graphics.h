@@ -79,7 +79,10 @@ namespace Graphics
             (ivec2,size,"Size")
         )
 
-        DefineExceptionInline(cant_load_image, :exception, "Can't load image.",
+        DefineExceptionInline(cant_parse_image, :exception, "Unable to parse an image.",
+            (std::string,name,"Name")
+        )
+        DefineExceptionInline(cant_save_image, :exception, "Unable to save an image.",
             (std::string,name,"Name")
         )
 
@@ -219,13 +222,13 @@ namespace Graphics
         enum Format {png, tga};
 
         Image() {}
-        Image(ivec2 size, const char *ptr = 0)
+        Image(ivec2 size, const uint8_t *ptr = 0)
         {
             FromMemory(size, ptr);
         }
-        Image(std::string fname, bool flip_y = 0)
+        Image(Utils::MemoryFile file, bool flip_y = 0)
         {
-            FromFile(fname, flip_y);
+            FromFile(file, flip_y);
         }
         ivec2 Size() const {return {width, int(data.size()) / width};}
         const u8vec4 *Data() const {return data.data();}
@@ -260,23 +263,23 @@ namespace Graphics
             return *this;
         }
 
-        void FromMemory(ivec2 size, const char *ptr = 0)
+        void FromMemory(ivec2 size, const uint8_t *ptr = 0)
         {
             width = size.x;
             data.resize(size.product());
             if (ptr)
-                std::copy(ptr, ptr + size.product() * sizeof(u8vec4), (char *)data.data());
+                std::copy(ptr, ptr + size.product() * sizeof(u8vec4), (uint8_t *)data.data());
         }
-        void FromFile(std::string fname, bool flip_y = 0)
+        void FromFile(Utils::MemoryFile file, bool flip_y = 0)
         {
             stbi_set_flip_vertically_on_load(flip_y); // This just sets an internal flag, shouldn't be slow.
             ivec2 size;
             [[maybe_unused]] int components;
-            char *ptr = (char *)stbi_load(fname.c_str(), &size.x, &size.y, &components, 4);
+            uint8_t *ptr = stbi_load_from_memory(file.Data(), file.Size(), &size.x, &size.y, &components, 4);
             if (!ptr)
             {
                 width = 0;
-                throw cant_load_image(fname);
+                throw cant_parse_image(file.Name());
             }
             FromMemory(size, ptr);
             stbi_image_free(ptr);
@@ -291,26 +294,29 @@ namespace Graphics
             return data.size() != 0;
         }
 
-        [[nodiscard]] static Image Memory(ivec2 size, const char *ptr = 0)
+        [[nodiscard]] static Image Memory(ivec2 size, const uint8_t *ptr = 0)
         {
             return Image(size, ptr);
         }
-        [[nodiscard]] static Image File(std::string fname, bool flip_y = 0)
+        [[nodiscard]] static Image File(Utils::MemoryFile file, bool flip_y = 0)
         {
-            return Image(fname, flip_y);
+            return Image(file, flip_y);
         }
 
         void SaveToFile(Format format, std::string fname)
         {
+            int status = 0;
             switch (format)
             {
               case png:
-                stbi_write_png(fname.c_str(), Size().x, Size().y, 4, data.data(), width * sizeof(u8vec4));
+                status = stbi_write_png(fname.c_str(), Size().x, Size().y, 4, data.data(), width * sizeof(u8vec4));
                 return;
               case tga:
-                stbi_write_tga(fname.c_str(), Size().x, Size().y, 4, data.data());
+                status = stbi_write_tga(fname.c_str(), Size().x, Size().y, 4, data.data());
                 return;
             }
+            if (!status)
+                throw cant_save_image(fname);
         }
 
         /*
