@@ -32,6 +32,8 @@ namespace Timing
         bool lag;
 
       public:
+        uint64_t ticks = 0;
+
         TickStabilizer() : TickStabilizer(60) {}
         TickStabilizer(double freq, int max_ticks_per_frame = 8)
         {
@@ -53,6 +55,7 @@ namespace Timing
             accumulator = 0;
             new_frame = 1;
             lag = 0;
+            ticks = 0;
         }
 
         bool Lag() // Flag resets after this function is called. The flag is set to 1 if the amount of ticks per last frame was limited due to reaching the limit.
@@ -92,6 +95,7 @@ namespace Timing
                 }
                 accumulator -= tick_len;
                 new_frame = 0;
+                ticks++;
                 return 1;
             }
             else

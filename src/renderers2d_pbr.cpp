@@ -5,16 +5,16 @@ namespace Renderers::Poly2D_PBR_impl::ShaderSource
     namespace Main
     {
         const char *const v = R"(
-VARYING(vec2, pos)
 VARYING(float, depth)
 VARYING(vec2, tex_pos)
+VARYING(vec2, alpha_beta)
 VARYING(mat2, normal_mat)
 void main()
 {
-    v_pos = a_pos.xy;
     gl_Position = u_matrix * vec4(a_pos.xy, 0, 1);
     v_depth = a_pos.z;
     v_tex_pos = a_tex_pos / u_tex_size;
+    v_alpha_beta = a_alpha_beta;
     v_normal_mat = mat2(a_normal_mat);
 })";
         const char *const f = R"(
@@ -32,7 +32,8 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 
 void main()
 {
-    vec3 albedo   = texture2D(u_tex_albedo, v_tex_pos).xyz;
+    vec4 albedo_a = texture2D(u_tex_albedo, v_tex_pos);
+    vec3 albedo   = albedo_a.xyz;
     vec3 N        = texture2D(u_tex_normal, v_tex_pos).xyz * vec3(2,2,-2) - 1.;
     vec4 stats    = texture2D(u_tex_m_r_h_ao, v_tex_pos);
     vec3 emission = texture2D(u_tex_emission, v_tex_pos).xyz * u_emission_factor;
@@ -41,7 +42,7 @@ void main()
     float depth     = (0.5 - stats.z) * 256. / 5. + v_depth;
     float ao        = stats.w;
 
-    N = mat3(v_normal_mat) * normalize(N);
+    N = normalize(mat3(v_normal_mat) * N);
     const vec3 V = vec3(0,0,-1);
 
     vec3 F0 = vec3(0.04);
@@ -64,13 +65,14 @@ void main()
 
     vec3 ambient = (kD * diffuse + specular) * ao;
 
-    vec4 final = vec4(ambient + emission, v_alpha_beta.x);
+    vec4 final = vec4(ambient + emission, v_alpha_beta.x * albedo_a.a);
     final.rgb *= final.a;
     final.a *= v_alpha_beta.y;
-    final.a = 1;
     gl_FragData[0] = final;
-    gl_FragData[1] = vec4(depth, 0, 0, 1);
-
+    if (final.a < 255./256. + 1./512.)
+        gl_FragData[1] = vec4(0);
+    else
+        gl_FragData[1] = vec4(depth, 0, 0, 1);
 })";
     }
     namespace Light
@@ -133,13 +135,14 @@ void main()
     float depth     = (0.5 - stats.z) * 256. / 5. + v_depth;
     if (depth > texture2D(u_tex_depth, v_sspos).r+0.5) discard;
 
-    vec3 albedo   = texture2D(u_tex_albedo, v_tex_pos).xyz;
+    vec4 albedo_a = texture2D(u_tex_albedo, v_tex_pos);
+    vec3 albedo   = albedo_a.xyz;
     vec3 N        = texture2D(u_tex_normal, v_tex_pos).xyz * vec3(2,2,-2) - 1.;
     float metallic  = stats.x;
     float roughness = stats.y * (1.-min_roughness) + min_roughness;
     float ao        = stats.w;
 
-    N = mat3(v_normal_mat) * normalize(N);
+    N = normalize(mat3(v_normal_mat) * N);
     const vec3 V = vec3(0,0,-1);
 
     float a = roughness * roughness;
@@ -165,7 +168,9 @@ void main()
             float len = length(L);
             float len2 = length(L2);
             float lend = length(Ld);
+            // This is broken:
             radiance *= 2 * clamp(dot(N, L) / (2 * len) + dot(N, L2) / (2 * len2), 0.0, 1.0) / (len * len2 + dot(L, L2) + 2);
+            // Ugh, whatever.
             float r_dot_ld = dot(r, Ld);
             float t = (dot(r, L) * dot(r, Ld) - dot(L, Ld)) / (lend * lend - r_dot_ld * r_dot_ld); // This is an approximation. Epic games paper has another better & slower one.
             L += Ld * clamp(t, 0.0, 1.0);
@@ -210,7 +215,7 @@ void main()
 
         vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
 
-    gl_FragColor = vec4(Lo, 0.0);
+    gl_FragColor = vec4(Lo * ao * albedo_a.a, 0.0);
 })";
     }
     namespace ExBr // Extract bright
@@ -304,6 +309,23 @@ void main()
     color = vec3(1.0) - exp(-color * exp(u_exposure));
     color = pow(color, vec3(1.0/2.2));
     gl_FragColor = vec4(color, 1);
+})";
+    }
+    namespace Iden
+    {
+        const char *const v = R"(
+VARYING(vec2, pos)
+void main()
+{
+    v_pos = a_pos;
+    gl_Position = vec4(a_pos * 2. - 1., 0, 1);
+})";
+        const char *const f = R"(
+VARYING(vec2, pos)
+void main()
+{
+    gl_FragColor = vec4(texture2D(u_texture, v_pos).rgb, 1);
+    //gl_FragColor = vec4(v_pos, 0, 1);
 })";
     }
 }

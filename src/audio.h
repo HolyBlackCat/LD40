@@ -626,8 +626,7 @@ namespace Audio
             {
                 DebugAssert("Attempt to use a null AL context.", Context::Exists());
                 alGenSources(1, &handle);
-                if (!handle)
-                    throw cant_create_al_resource("Buffer");
+                if (!handle) handle = -1;
                 alSourcef(*this, AL_REFERENCE_DISTANCE, default_ref_dist);
                 alSourcef(*this, AL_ROLLOFF_FACTOR,     default_rolloff_fac);
                 alSourcef(*this, AL_MAX_DISTANCE,       default_max_dist);
@@ -656,12 +655,15 @@ namespace Audio
         Source() {}
 
         // This deletes copy constructor and assignment.
-        Source(Source &&o) = default;
-        Source &operator=(Source &&o) = default;
+        Source(Source &&o) : object(std::move(o.object)), temp(o.temp)
+        {
+            o.temp = 0;
+        }
+        Source &operator=(Source &&o) = delete;
 
         ~Source()
         {
-            if (Exists() && temp)
+            if (Exists() && temp && *object != ALuint(-1))
             {
                 int looping;
                 alGetSourcei(*object, AL_LOOPING, &looping);
@@ -729,18 +731,21 @@ namespace Audio
         ref max_distance(float d)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcef(*object, AL_MAX_DISTANCE, d);
             return (ref)*this;
         }
         ref ref_distance(float d)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcef(*object, AL_REFERENCE_DISTANCE, d);
             return (ref)*this;
         }
         ref rolloff_factor(float f)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcef(*object, AL_ROLLOFF_FACTOR, f);
             return (ref)*this;
         }
@@ -748,6 +753,7 @@ namespace Audio
         ref temporary() // Doesn't work for looped sounds. Plays the sound after the object is destroyed.
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             temp = 1;
             return (ref)*this;
         }
@@ -755,18 +761,21 @@ namespace Audio
         ref volume(float v)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcef(*object, AL_GAIN, v);
             return (ref)*this;
         }
         ref pitch(float v)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcef(*object, AL_PITCH, v);
             return (ref)*this;
         }
         ref loop(float l)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcei(*object, AL_LOOPING, l);
             return (ref)*this;
         }
@@ -774,12 +783,14 @@ namespace Audio
         ref play()
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcePlay(*object);
             return (ref)*this;
         }
         ref stop()
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourceStop(*object);
             return (ref)*this;
         }
@@ -789,18 +800,21 @@ namespace Audio
         ref pos(fvec3 p)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcefv(*object, AL_POSITION, p.as_array());
             return (ref)*this;
         }
         ref vel(fvec3 v)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcefv(*object, AL_VELOCITY, v.as_array());
             return (ref)*this;
         }
         ref relative(bool r = 1)
         {
             DebugAssert("Attempt to use a null audio source.", Exists());
+            if (*object == ALuint(-1)) return (ref)*this;
             alSourcei(*object, AL_SOURCE_RELATIVE, r);
             return (ref)*this;
         }

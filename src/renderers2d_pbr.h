@@ -1,9 +1,11 @@
 #ifndef RENDERERS2D_PBR_H_INCLUDED
 #define RENDERERS2D_PBR_H_INCLUDED
 
+#include <iostream>
 #include <utility>
 
 #include "graphics.h"
+#include "input.h"
 #include "mat.h"
 #include "reflection.h"
 #include "strings.h"
@@ -65,6 +67,10 @@ namespace Renderers
             (Graphics::Shader::FragmentUniform<float>)(exposure),
         ))
 
+        ReflectStruct(UniIden, (
+            (Graphics::Shader::FragmentUniform<Graphics::Texture>)(texture),
+        ))
+
 
         namespace ShaderSource
         {
@@ -92,6 +98,10 @@ namespace Renderers
             {
                 extern const char *const v, *const f;
             }
+            namespace Iden
+            {
+                extern const char *const v, *const f;
+            }
         }
     }
 
@@ -105,12 +115,14 @@ namespace Renderers
         Graphics::Shader sh_blur;
         Graphics::Shader sh_copy;
         Graphics::Shader sh_final;
+        Graphics::Shader sh_iden;
         Poly2D_PBR_impl::UniMain  uni_main;
         Poly2D_PBR_impl::UniLight uni_light;
         Poly2D_PBR_impl::UniExBr  uni_exbr;
         Poly2D_PBR_impl::UniBlur  uni_blur;
         Poly2D_PBR_impl::UniCopy  uni_copy;
         Poly2D_PBR_impl::UniFinal uni_final;
+        Poly2D_PBR_impl::UniIden  uni_iden;
 
         Graphics::Texture tex_framebuffer_hdr;
         Graphics::Texture tex_framebuffer_hdr_depth;
@@ -120,10 +132,15 @@ namespace Renderers
         Graphics::Texture tex_framebuffer_bloom2;
         Graphics::FrameBuffer framebuffer_bloom1;
         Graphics::FrameBuffer framebuffer_bloom2;
+        Graphics::Texture tex_framebuffer_final;
+        Graphics::FrameBuffer framebuffer_final;
 
         Graphics::RenderQueue<Poly2D_PBR_impl::AttrMain, Graphics::triangles, Graphics::expand> queue;
 
         const Graphics::CharMap *ch_map = 0;
+
+        ivec2 scr_sz, real_sz;
+        float scale;
 
         static void FullscreenQuad()
         {
@@ -140,6 +157,8 @@ namespace Renderers
         }
 
       public:
+        Input::Mouse mouse;
+
         class Quad_t : TemplateUtils::MoveFunc<Quad_t>
         {
             using ref = Quad_t &&;
@@ -231,20 +250,9 @@ namespace Renderers
                 out[1].pos = fvec2(out[0].pos.x, out[2].pos.y).to_vec3(m_depth);
                 out[3].pos = fvec2(out[2].pos.x, out[0].pos.y).to_vec3(m_depth);
 
-                fmat2 nm;
-
-                if (has_matrix)
-                {
-                    for (auto &it : out)
-                        it.pos = m_pos.to_vec3(0) + (m_matrix /mul/ it.pos.set_z(1)).set_z(0);
-                    nm = m_matrix.to_mat2().inverse().transpose();
-                }
-                else
-                {
-                    for (auto &it : out)
-                        it.pos += m_pos.to_vec3(0);
-                    nm = fmat2::identity();
-                }
+                for (auto &it : out)
+                    it.pos = m_pos.to_vec3(it.pos.z) + (m_matrix /mul/ it.pos.set_z(1)).set_z(0);
+                fmat2 nm = m_matrix.to_mat2().inverse().transpose();
 
                 out[0].tex_pos = m_tex_pos;
                 out[2].tex_pos = m_tex_pos + m_tex_size;
@@ -828,6 +836,7 @@ namespace Renderers
         }
         void Create(ivec2 scr, int size, const Graphics::Texture &lut)
         {
+            scr_sz = scr;
             queue.Create(size);
 
             sh_main .Create<Poly2D_PBR_impl::AttrMain>("PBR main" , Poly2D_PBR_impl::ShaderSource::Main ::v, Poly2D_PBR_impl::ShaderSource::Main ::f, &uni_main );
@@ -836,21 +845,29 @@ namespace Renderers
             sh_blur .Create<Poly2D_PBR_impl::AttrTex >("PBR blur" , Poly2D_PBR_impl::ShaderSource::Blur ::v, Poly2D_PBR_impl::ShaderSource::Blur ::f, &uni_blur );
             sh_copy .Create<Poly2D_PBR_impl::AttrTex >("PBR copy" , Poly2D_PBR_impl::ShaderSource::Copy ::v, Poly2D_PBR_impl::ShaderSource::Copy ::f, &uni_copy );
             sh_final.Create<Poly2D_PBR_impl::AttrTex >("PBR final", Poly2D_PBR_impl::ShaderSource::Final::v, Poly2D_PBR_impl::ShaderSource::Final::f, &uni_final);
+            sh_iden .Create<Poly2D_PBR_impl::AttrTex >("PBR iden" , Poly2D_PBR_impl::ShaderSource::Iden ::v, Poly2D_PBR_impl::ShaderSource::Iden ::f, &uni_iden );
             uni_main.lookup = lut;
             SetMatrix(fmat4::identity());
 
             tex_framebuffer_hdr.Create();
             tex_framebuffer_hdr.SetData(GL_RGB16F, GL_RGB, GL_UNSIGNED_BYTE, scr);
-            tex_framebuffer_hdr.Interpolation(Graphics::Texture::linear);
+            tex_framebuffer_hdr.Interpolation(Graphics::Texture::nearest);
             tex_framebuffer_hdr_depth.Create();
             tex_framebuffer_hdr_depth.SetData(GL_R32F, GL_RGB, GL_UNSIGNED_BYTE, scr);
-            tex_framebuffer_hdr_depth.Interpolation(Graphics::Texture::linear);
+            tex_framebuffer_hdr_depth.Interpolation(Graphics::Texture::nearest);
             framebuffer_hdr.Create();
             framebuffer_hdr.Attach({tex_framebuffer_hdr, tex_framebuffer_hdr_depth});
             framebuffer_hdr.Unbind();
             framebuffer_hdr_color.Create();
             framebuffer_hdr_color.Attach(tex_framebuffer_hdr);
             framebuffer_hdr_color.Unbind();
+
+            tex_framebuffer_final.Create();
+            tex_framebuffer_final.Attach();
+            tex_framebuffer_final.Interpolation(Graphics::Texture::linear);
+            framebuffer_final.Create();
+            framebuffer_final.Attach(tex_framebuffer_final);
+            framebuffer_final.Unbind();
 
             for (auto it : {&tex_framebuffer_bloom1, &tex_framebuffer_bloom2})
             {
@@ -864,7 +881,7 @@ namespace Renderers
             framebuffer_bloom1.Attach(tex_framebuffer_bloom1);
             framebuffer_bloom2.Attach(tex_framebuffer_bloom2);
 
-            uni_main.emission_factor = 10;
+            uni_main.emission_factor = 4;
 
             uni_light.tex_depth = tex_framebuffer_hdr_depth;
 
@@ -878,6 +895,8 @@ namespace Renderers
 
             uni_final.texture = tex_framebuffer_hdr;
             uni_final.exposure = 0;
+
+            uni_iden.texture = tex_framebuffer_final;
         }
         /*
         void Destroy()
@@ -885,6 +904,17 @@ namespace Renderers
             shader.Destroy();
             queue.Destroy();
         }*/
+
+        void Resize(ivec2 sz)
+        {
+            real_sz = sz;
+            scale = (fvec2(sz) / scr_sz).min();
+            float scale_fl = floor(scale);
+            tex_framebuffer_final.SetData(GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, scr_sz * scale_fl);
+
+            mouse.offset = sz / 2;
+            mouse.scale = 1 / scale;
+        }
 
         void DrawAmbient()
         {
@@ -913,6 +943,11 @@ namespace Renderers
             uni_light.light_radius = rad;
             uni_light.light_tube = 1;
             queue.DrawNoReset();
+        }
+
+        void DrawStart()
+        {
+            Graphics::Viewport(scr_sz);
         }
 
         void DrawFinal()
@@ -951,11 +986,20 @@ namespace Renderers
                 Graphics::Blending::Disable();
             }
 
-            Graphics::FrameBuffer::Unbind();
-
+            framebuffer_final.Bind();
             sh_final.Bind();
-
+            Graphics::Viewport(tex_framebuffer_final.Size());
             FullscreenQuad();
+
+            Graphics::FrameBuffer::Unbind();
+            sh_iden.Bind();
+            Graphics::Viewport(real_sz/2 - scr_sz * scale / 2, scr_sz * scale);
+            FullscreenQuad();
+        }
+
+        void Exposure(float e)
+        {
+            uni_final.exposure = e;
         }
 
         void SetMatrix(fmat4 m) // Binds a shader. Only the last call has effect for each frame.
