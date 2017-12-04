@@ -220,6 +220,7 @@ namespace Audio
             Format_t new_format;
             switch (channels << 16 | bits_per_sample)
             {
+                default:
                 case 1 << 16 |  8: new_format = mono8;    break;
                 case 1 << 16 | 16: new_format = mono16;   break;
                 case 2 << 16 |  8: new_format = stereo8;  break;

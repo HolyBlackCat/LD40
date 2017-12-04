@@ -259,8 +259,10 @@ namespace Renderers
                 out[1].tex_pos = {out[0].tex_pos.x, out[2].tex_pos.y};
                 out[3].tex_pos = {out[2].tex_pos.x, out[0].tex_pos.y};
 
+                fvec4 nm_v;
+                std::memcpy(&nm_v, &nm, sizeof nm);
                 for (auto &it : out)
-                    it.normal_mat = (fvec4 &)nm;
+                    it.normal_mat = nm_v;
 
                 queue->Quad(out[0], out[1], out[2], out[3]);
             }

@@ -43,9 +43,19 @@ namespace Sounds
         SOUND( laser_hitting       , 0.3  ) \
         SOUND( block_breaks        , 0.2  ) \
         SOUND( trash_block_breaks  , 0.2  ) \
+        SOUND( block_attaches      , 0.3  ) \
         SOUND( mine_explodes       , 0.2  ) \
         SOUND( mine_spawns         , 0.2  ) \
         SOUND( checkpoint          , 0.2  ) \
+        SOUND( boss_trash          , 0.2  ) \
+        SOUND( boss_hit            , 0.2  ) \
+        SOUND( boss_charge         , 0.2  ) \
+        SOUND( boss_dash           , 0.2  ) \
+        SOUND( boss_mines          , 0.2  ) \
+        SOUND( boss_death          , 0    ) \
+        SOUND( boss_start          , 0.2  ) \
+        SOUND( boss_wings_move     , 0.2  ) \
+        SOUND( goal                , 0    ) \
 
     #define SOUND(NAME, RAND) \
         auto NAME(fvec2 pos, float vol = 1, float pitch = 0) \
@@ -56,21 +66,27 @@ namespace Sounds
 
     SOUND_LIST
     #undef SOUND
+
+    Audio::Buffer theme_buf;
+    Audio::Source theme;
+    constexpr float theme_vol = 1/3.;
+    bool theme_plays = 1;
 }
 
 void Init()
 {
     Events::SetErrorHandlers();
-    win.Create("Woah", screen_sz * 2, Window::Settings{}.Resizable(1).MinSize(screen_sz));
+    win.Create("Ni by HolyBlackCat", screen_sz * 2, Window::Settings{}.Resizable(1).MinSize(screen_sz));
+    win.Fullscreen(1);
 
-    Graphics::Image img_lookup   ("assets/lookup.png"),
-                    img_albedo   ("assets/texture-albedo.png"),
-                    img_ao       ("assets/texture-ao.png"),
-                    img_emission ("assets/texture-emission.png"),
-                    img_metallic ("assets/texture-metallic.png"),
-                    img_roughness("assets/texture-roughness.png"),
-                    img_height   ("assets/texture-height.png"),
-                    img_normal   ("assets/texture-normal.png");
+    Graphics::Image img_lookup   ("assets/lookup.gnp"),
+                    img_albedo   ("assets/texture-albedo.gnp"),
+                    img_ao       ("assets/texture-ao.gnp"),
+                    img_emission ("assets/texture-emission.gnp"),
+                    img_metallic ("assets/texture-metallic.gnp"),
+                    img_roughness("assets/texture-roughness.gnp"),
+                    img_height   ("assets/texture-height.gnp"),
+                    img_normal   ("assets/texture-normal.gnp");
 
     ivec2 tex_sz = img_albedo.Size();
     Graphics::Image img_m_r_h_ao(tex_sz);
@@ -102,8 +118,14 @@ void Init()
 
     Graphics::Blending::FuncNormalPre();
 
+    Audio::Volume(2);
     Audio::Source::DefaultRefDistance(200);
     Audio::Source::DefaultRolloffFactor(1);
+
+    Sounds::theme_buf.Create();
+    Sounds::theme_buf.SetData(Audio::Sound::OGG("assets/theme.ogg"));
+    Sounds::theme.Create(Sounds::theme_buf);
+    Sounds::theme.loop(1).volume(Sounds::theme_vol).play();
 }
 
 namespace Tiles
@@ -120,6 +142,7 @@ namespace Tiles
         one_way,
         one_way_r,
         one_way_d,
+        boss,
         _rec_count,
     };
 
@@ -127,10 +150,12 @@ namespace Tiles
         /*    name              color            render mode              group  light            solid breaks*/\
         TILE( air               , 255,255,255,255, invis()                , 0 , 0                  , 0 , 0 , ) \
         TILE( wall              ,  0 , 0 , 0 ,255, rotate(0)              , 1 , 0                  , 1 , 0 , ) \
+        TILE( wall_back         ,  63, 63, 63,255, rotate(4)              , 1 , 0                  , 0 , 0 , ) \
         TILE( light             , 255,255, 0 ,255, norm(1)                , 0 , fvec3(1,.8,.6)*550 , 1 , 0 , ) \
         TILE( spawn             ,  0 , 0 ,255,255, invis(Re::spawn)       , 0 , 0                  , 0 , 0 , ) \
         TILE( breakable         , 127,127,127,255, norm(2)                , 2 , 0                  , 1 , 1 , ) \
         TILE( help_sign         ,  0 ,127, 0 ,255, decal(208,215,64,64)   , 0 , 0                  , 0 , 0 , ) \
+        TILE( help_sign_2       ,  0 , 63, 0 ,255, decal(286,215,120,24)  , 0 , 0                  , 0 , 0 , ) \
         TILE( trash_block       , 255, 0 , 0 ,255, invis(Re::trash)       , 0 , 0                  , 0 , 0 , ) \
         TILE( homing_mine       , 255,127, 0 ,255, invis(Re::homing_mine) , 0 , 0                  , 0 , 0 , ) \
         TILE( laser_turret      , 127, 0 , 0 ,255, invis(Re::las_turret)  , 0 , 0                  , 0 , 0 , ) \
@@ -138,9 +163,11 @@ namespace Tiles
         TILE( checkpoint        ,  0 ,255, 0 ,255, invis(Re::checkpoint)  , 0 , 0                  , 0 , 0 , ) \
         TILE( door              , 255, 0 ,255,255, norm(3)                , 0 , 0                  , 1 , 0 , ) \
         TILE( key               , 255,127,255,255, invis(Re::key)         , 0 , 0                  , 0 , 0 , ) \
+        TILE( door_boss         , 127, 0 ,127,255, norm(5)                , 0 , 0                  , 1 , 0 , ) \
         TILE( one_way_passage   ,  0 , 0 ,127,255, invis(Re::one_way)     , 0 , 0                  , 0 , 0 , ) \
         TILE( one_way_passage_r ,  0 , 0 , 63,255, invis(Re::one_way_r)   , 0 , 0                  , 0 , 0 , ) \
         TILE( one_way_passage_d ,  0 , 0 ,191,255, invis(Re::one_way_d)   , 0 , 0                  , 0 , 0 , ) \
+        TILE( boss              , 255,127,127,255, invis(Re::boss)        , 0 , 0                  , 0 , 0 , ) \
 
     enum Enum
     {
@@ -249,7 +276,7 @@ class Map
     ivec2 size = ivec2(0);
     std::vector<std::vector<ivec2>> rec{int(Tiles::Re::_rec_count)};
   public:
-    inline static constexpr int tsz = 24, z_offset = 64, light_z_offset = -30;
+    inline static constexpr int tsz = 24, z_offset = 92, light_z_offset = -30;
     inline static constexpr float light_rad = 2.5;
 
     std::vector<ivec2> Rec(Tiles::Re index)
@@ -314,9 +341,9 @@ class Map
 
     Map(std::string fname)
     {
-        Graphics::Image img0(fname + "_3.png");
-        Graphics::Image img1(fname + "_2.png");
-        Graphics::Image img2(fname + "_1.png");
+        Graphics::Image img0(fname + "_3.gnp");
+        Graphics::Image img1(fname + "_2.gnp");
+        Graphics::Image img2(fname + "_1.gnp");
 
         if (img0.Size() != img1.Size() || img1.Size() != img2.Size())
             Program::Error(Str("Map size mismatch for \"", fname, "\"."));
@@ -435,6 +462,10 @@ struct OneWay
     int dir; // 0 - up, 1 - right, 2 - down
 };
 
+int death_counter = 0;
+uint64_t starting_time = 0, ending_time = 0;
+float starting_screen_alpha = 2;
+
 struct World
 {
     struct Player
@@ -460,6 +491,9 @@ struct World
     inline static constexpr float extra_exp_max = 5;
     float extra_exp = extra_exp_max;
 
+    bool goal_exists = 0;
+    int fin = 0;
+
     std::deque<Light> light_queue;
     std::deque<Particle> par_queue;
     std::deque<Laser> laser_list;
@@ -470,10 +504,51 @@ struct World
     std::vector<fvec2> checkpoint_list;
     std::vector<OneWay> one_way_list;
 
+    struct Boss
+    {
+        enum State
+        {
+            idle,
+            waking_up,
+            waiting,
+            aiming_t,
+            shooting_trash,
+            aiming_l,
+            shooting_lasers,
+            aiming_d,
+            dash,
+            aiming_d2,
+            dash2,
+            aiming_d3,
+            dash3,
+            shooting_mines,
+            charging,
+        };
+        State state = idle;
+
+        int dead = 0;
+        int timer = 0;
+        fvec2 pos, home;
+        float rot = f_pi/2;
+        float wing_an = 0, wing_an_s = 0, wing_offset = 0;
+        fvec2 dash_src, dash_dst;
+        float core_offset = 0;
+        bool was_hit = 0;
+        int hp = 3;
+
+        bool open_core = 0;
+        bool open_wings = 0;
+        int aim = 0;
+    };
+    Boss boss;
+
     void kill_player()
     {
-        if (!p.dead)
+        if (!p.dead && !fin)
+        {
             p.dead = 1;
+            death_counter++;
+        }
     }
 
     bool at_screen_circle(fvec2 pos, float rad)
@@ -538,6 +613,8 @@ struct World
             one_way_list.push_back({it, 1});
         for (auto it : map.Rec(Tiles::Re::one_way_d))
             one_way_list.push_back({it, 2});
+
+        boss.pos = boss.home = map.Rec(Tiles::Re::boss)[0];
     }
     void push_light(fvec3 color, fvec3 pos, float rad = 0)
     {
@@ -598,15 +675,16 @@ void Map::Render(int z) const
         if ((l_color > 0.1).any())
             w.push_light(l_color, ((fvec2(x,y) + 0.5) * tsz).to_vec3(z_offset * z + light_z_offset), light_rad);
 
+        float dep = z * z_offset - 32;
         switch (info.mode)
         {
           case Tiles::Info::inv:
             break;
           case Tiles::Info::nor:
-            r.Quad(ivec2(x,y) * tsz, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
+            r.Quad(ivec2(x,y) * tsz, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
             break;
           case Tiles::Info::dec:
-            r.Quad((ivec2(x,y)+0.5) * tsz, z_offset * z, info.decal_sz).tex(info.decal_pos).center();
+            r.Quad((ivec2(x,y)+0.5) * tsz, dep, info.decal_sz).tex(info.decal_pos).center();
             break;
           case Tiles::Info::rot:
             {
@@ -616,7 +694,7 @@ void Map::Render(int z) const
                     g = g << 1 | (this_g == Group(z, ivec2(x,y) + it));
                 auto beq = [=](int b) -> bool {return (g & b) == b;};
                 if (g == 0b1111'1111)
-                    r.Quad(ivec2(x,y) * tsz, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz));
+                    r.Quad(ivec2(x,y) * tsz, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz));
                 else if ((beq(0b1110'0011) && !(g & 0b0000'1000)) ||
                          (beq(0b1111'1000) && !(g & 0b0000'0010)) ||
                          (beq(0b0011'1110) && !(g & 0b1000'0000)) ||
@@ -627,7 +705,7 @@ void Map::Render(int z) const
                     else if (beq(0b1111'1000)) angle = 0;
                     else if (beq(0b0011'1110)) angle = f_pi / 2;
                     else                       angle = f_pi;
-                    r.Quad(ivec2(x,y) * tsz + tsz/2, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*2)).center().rotate(angle);
+                    r.Quad(ivec2(x,y) * tsz + tsz/2, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*2)).center().rotate(angle);
                 }
                 else if (beq(0b1010'1010) ||
                          beq(0b0010'1010) ||
@@ -635,7 +713,7 @@ void Map::Render(int z) const
                          beq(0b1010'0010) ||
                          beq(0b1010'1000))
                 {
-                    r.Quad(ivec2(x,y) * tsz, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
+                    r.Quad(ivec2(x,y) * tsz, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
                 }
                 else if (beq(0b1000'1000) ||
                          beq(0b0010'0010))
@@ -643,7 +721,7 @@ void Map::Render(int z) const
                     float angle;
                     if (beq(0b1000'1000)) angle = 0;
                     else                   angle = f_pi/2;
-                    r.Quad(ivec2(x,y) * tsz + tsz/2, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*4)).center().rotate(angle);
+                    r.Quad(ivec2(x,y) * tsz + tsz/2, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*4)).center().rotate(angle);
                 }
                 else if (beq(0b1110'0000) ||
                          beq(0b0011'1000) ||
@@ -655,10 +733,10 @@ void Map::Render(int z) const
                     else if (beq(0b0011'1000)) angle = 0;
                     else if (beq(0b0000'1110)) angle = f_pi / 2;
                     else                        angle = f_pi;
-                    r.Quad(ivec2(x,y) * tsz + tsz/2, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*3)).center().rotate(angle);
+                    r.Quad(ivec2(x,y) * tsz + tsz/2, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, tsz*3)).center().rotate(angle);
                 }
                 else
-                    r.Quad(ivec2(x,y) * tsz, z_offset * z, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
+                    r.Quad(ivec2(x,y) * tsz, dep, ivec2(tsz)).tex(ivec2(info.index * tsz, 0));
 
             }
             break;
@@ -690,13 +768,19 @@ int main(int, char **)
                     exposure_step = -0.05, laser_pa_gap = 12, laser_pa_rand = 1, laser_pa_rspeed = 0.5,
                     laser_li_z = 50, death_light_2_fac = 1000,
                     laser_x_off = 11, laser_y_off = -7,
-                    player_rad = 13, trash_rad = 6, homing_mine_rad = 12,
+                    player_rad = 13, trash_rad = 6, trash_rad_las = 4, homing_mine_rad = 12,
                     homing_mine_ang_vel = 0.05, homing_mine_acc = 0.04, homing_mine_spd_cap = 6, homing_mine_vel_fac = 0.98,
                     mine_spawn_cd = 180,
                     laser_turret_acc = 0.2, laser_turret_rad = 18, laser_turret_speed_cap = 1.5, laser_turret_hitbox_x = 27, laser_turret_hitbox_y = 12,
                     laser_turret_shoot_at = 20, laser_turret_cd = 60, laser_turret_las_y = 14,
-                    trash_mass = 0.12, trash_inertia_moment_fac = 1./1000;
-    constexpr int laser_cd = 20, death_light_len = 100, death_light_2_start = 120, death_light_2_t_cap = 240;
+                    trash_mass = 0.12, trash_inertia_moment_fac = 1./1000,
+                    boss_hitbox_rad = 35, boss_z = 120, boss_wing_a_sp = 0.015, boss_av = 0.04, boss_trash_av = 0.05, boss_trash_a_range = f_pi/8,
+                    boss_trash_offset = 8, boss_trash_min = 40, boss_trash_max = 150, boss_trash_sp_min = 1, boss_trash_sp_max = 3,
+                    boss_las_offset = 50, boss_las_len = 120, boss_mine_count = 3, boss_mine_offset = 45, boss_mine_speed = 0.2,
+                    boss_core_shell_sp = 0.5, boss_core_shell_max = 30,
+                    boss_hp_offset = 10, boss_hp_gap = 8;
+    constexpr int laser_cd = 20, death_light_len = 100, death_light_2_start = 120, death_light_2_t_cap = 120,
+                  boss_trash_per_wing = 9;
 
     Events::SetErrorHandlers();
     Init();
@@ -746,10 +830,18 @@ int main(int, char **)
             return 1;
         };
 
+        { // Music
+            if (Keys::m.pressed())
+                Sounds::theme.volume(Sounds::theme_plays = !Sounds::theme_plays);
+        }
+
         { // Begin
             w.cam_pos_p = w.cam_pos;
             if (w.p.dead)
                 w.p.dead++;
+
+            if (starting_time == 0 && (Keys::any.pressed() || mouse.any_button.pressed()))
+                starting_time = ts.ticks;
         }
 
         { // Particles
@@ -800,6 +892,12 @@ int main(int, char **)
                     }
                 }
 
+                if (!it->dead && !w.boss.dead && it->hits(w.boss.pos, boss_hitbox_rad)) // Hitting boss
+                {
+                    it->dead = 1;
+                    w.boss.was_hit = 1;
+                }
+
                 if (it->enemy && it->hits(w.p.pos, player_rad)) // Hitting player
                 {
                     it->dead = 1;
@@ -838,7 +936,7 @@ int main(int, char **)
             auto it = w.trash_block_list.begin();
             while (it != w.trash_block_list.end())
             {
-                if (!w.at_screen_circle(it->pos, 10))
+                if (!w.at_screen_circle(it->pos, 180))
                 {
                     it++;
                     continue;
@@ -852,14 +950,14 @@ int main(int, char **)
                     {
                         if (l.enemy)
                             continue;
-                        if (l.hits(it->pos, 6))
+                        if (l.hits(it->pos, trash_rad_las))
                         {
                             destroy = 1;
                             break;
                         }
                     }
                 }
-                if (!destroy) // Hitting a player
+                if (!destroy && !w.fin) // Hitting a player
                 {
                     if ((it->pos - w.p.pos).len_sqr() <= ipow(player_rad + trash_rad, 2))
                     {
@@ -868,7 +966,7 @@ int main(int, char **)
                         w.p.trash.push_back({{(mi /mul/ it->pos.to_vec3(1)).to_vec2()}, it->vis_angle - w.p.rot, it->is_key});
                     }
                 }
-                if (!destroy) // Hitting a box attached to player
+                if (!destroy && !w.fin) // Hitting a box attached to player
                 {
                     for (const auto &o : w.p.trash)
                     {
@@ -893,6 +991,8 @@ int main(int, char **)
                             w.push_particle(3, 0.97, Rand::Int(-5, 5), 30, it->pos + fvec2(Rand::Float(-6,6),Rand::Float(-6,6)), fvec2(std::cos(a), std::sin(a)) * Rand::Float(0,0.5));
                         }
                     }
+                    else
+                        Sounds::block_attaches(it->pos);
                     it = w.trash_block_list.erase(it);
                 }
                 else
@@ -1131,8 +1231,263 @@ int main(int, char **)
                                  Rand::Float(-Map::tsz/2,Map::tsz/2));
                 static const std::vector<fvec2> dirs{{0,-1},{1,0},{0,1}};
                 for (int i = 0; i < 4; i++)
-                    w.push_particle(6, 0.98, Rand::Int(15, 25), 30, it.pos + rv, dirs[it.dir]);
+                    w.push_particle(6, 0.98, Rand::Int(15, 25), 30, it.pos + rv, dirs[it.dir] * !w.fin);
             }
+        }
+
+        { // Boss
+            if (!w.boss.dead)
+            {
+                fmat2 bm = fmat2::rotate2D(w.boss.rot);
+
+                // Wings
+                if (!w.p.dead)
+                {
+                    w.boss.wing_an += (w.boss.open_wings ? boss_wing_a_sp : -boss_wing_a_sp);
+                    w.boss.wing_an = clamp(w.boss.wing_an, 0, f_pi / 2);
+                    w.boss.wing_an_s = smoothstep(w.boss.wing_an / f_pi * 2) * f_pi / 2;
+                    w.boss.wing_offset = std::sin(w.boss.wing_an_s * 2) * 20;
+                }
+
+                // Aim
+                if (w.boss.aim && !w.p.dead)
+                {
+                    fvec2 dst_dir = (w.p.pos - w.boss.pos).norm();
+                    fvec2 dir = fvec2(std::cos(w.boss.rot), std::sin(w.boss.rot));
+
+                    if (w.boss.aim < 0)
+                        dst_dir = -dst_dir;
+
+                    float a_delta = std::asin(dst_dir /cross/ dir);
+                    if (abs(a_delta) > boss_av)
+                        w.boss.rot -= sign(a_delta) * boss_av;
+                }
+
+                // Core shell
+                if (!w.p.dead)
+                {
+                    w.boss.core_offset += (w.boss.open_core ? boss_core_shell_sp : -boss_core_shell_sp);
+                    w.boss.core_offset = clamp(w.boss.core_offset, 0, boss_core_shell_max);
+                }
+
+                // Kill player
+                if ((w.boss.pos - w.p.pos).len() < boss_hitbox_rad + player_rad)
+                    w.kill_player();
+
+                auto Next = [&](World::Boss::State st, int time)
+                {
+                    if (w.boss.timer < time)
+                        return;
+                    w.boss.state = st;
+                    w.boss.timer = 0;
+                };
+
+                switch (w.boss.state)
+                {
+                  case w.boss.idle:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    if (w.boss.was_hit)
+                    {
+                        Sounds::boss_start(w.boss.pos);
+                        Next(w.boss.waking_up, 0);
+                    }
+                    else
+                        Next(w.boss.idle, 0);
+                    break;
+                  case w.boss.waking_up:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    Next(w.boss.waiting, 90);
+                    break;
+                  case w.boss.waiting:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    Next(w.boss.aiming_t, 60);
+                    break;
+                  case w.boss.aiming_t:
+                    w.boss.aim = -1;
+                    if (w.boss.timer == 1)
+                        Sounds::boss_wings_move(w.boss.pos);
+                    w.boss.open_wings = 1;
+                    Next(w.boss.shooting_trash, 90);
+                    break;
+                  case w.boss.shooting_trash:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 1;
+                    if (w.boss.timer == 1 || w.boss.timer == 30)
+                    {
+                        Sounds::boss_trash(w.boss.pos);
+                        for (int x = 0; x < boss_trash_per_wing; x++)
+                        {
+                            for (int s = -1; s <= 1; s += 2)
+                            {
+                                TrashBlock tb;
+                                tb.pos = w.boss.pos + bm /mul/ fvec2(boss_trash_offset, s * Rand::Float(boss_trash_min, boss_trash_max));
+                                tb.angle = w.boss.rot + f_pi + Rand::Float(-boss_trash_a_range, boss_trash_a_range);
+                                tb.speed = Rand::Float(boss_trash_sp_min, boss_trash_sp_max);
+                                tb.vis_angle = Rand::Float(-f_pi, f_pi);
+                                tb.vis_av = Rand::Float(-boss_trash_av, boss_trash_av);
+                                w.trash_block_list.push_back(tb);
+                            }
+                        }
+                    }
+                    Next(w.boss.aiming_l, 45);
+                    break;
+                  case w.boss.aiming_l:
+                    w.boss.aim = -1;
+                    w.boss.open_wings = 1;
+                    Next(w.boss.shooting_lasers, 60);
+                    break;
+                  case w.boss.shooting_lasers:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    if (w.boss.timer == 1)
+                        Sounds::boss_wings_move(w.boss.pos);
+                    if (w.boss.timer % 13 == 6)
+                    {
+                        for (int s = -1; s <= 1; s += 2)
+                        {
+                            fvec2 pos = w.boss.pos + bm /mul/ fmat2::rotate2D(s * w.boss.wing_an_s) /mul/ fvec2(-boss_las_offset - w.boss.wing_offset,0);
+                            w.add_laser(pos, w.boss.rot + f_pi + s * w.boss.wing_an_s, 3, boss_las_len, fvec3(1,0,0.5)*20000, 4, 1);
+                            Sounds::laser(pos,0.5,-0.3);
+                        }
+                    }
+                    if (w.boss.timer == 90)
+                    {
+                        fvec2 pos = w.boss.pos + bm /mul/ fvec2(-boss_las_offset - w.boss.wing_offset,0);
+                        w.add_laser(pos, w.boss.rot + f_pi, 3, boss_las_len, fvec3(1,0,0.5)*20000, 4, 1);
+                    }
+                    Next(w.boss.aiming_d, 90);
+                    break;
+                  case w.boss.aiming_d:
+                  case w.boss.aiming_d2:
+                  case w.boss.aiming_d3:
+                    w.boss.aim = (w.boss.state == w.boss.aiming_d);
+                    w.boss.open_wings = 0;
+                    {
+                        int end_t = (w.boss.state == w.boss.aiming_d ? 90 : 45);
+                        if (w.boss.timer == end_t)
+                        {
+                            w.boss.dash_src = w.boss.pos;
+                            if (w.boss.state == w.boss.aiming_d3)
+                                w.boss.dash_dst = w.boss.home;
+                            else
+                                w.boss.dash_dst = w.p.pos;
+                        }
+                             if (w.boss.state == w.boss.aiming_d ) Next(w.boss.dash , end_t);
+                        else if (w.boss.state == w.boss.aiming_d2) Next(w.boss.dash2, end_t);
+                        else if (w.boss.state == w.boss.aiming_d3) Next(w.boss.dash3, end_t);
+                    }
+                    break;
+                  case w.boss.dash:
+                  case w.boss.dash2:
+                  case w.boss.dash3:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    if (w.boss.timer == 1)
+                        Sounds::boss_dash(w.boss.pos);
+                    {
+                        float t = 0;
+                        if (w.boss.timer == 180)
+                            t = 0;
+                        if (w.boss.timer < 60)
+                            t = w.boss.timer / 60.;
+                        else if (w.boss.timer < 120)
+                            t = 1;
+                        else
+                            t = 1 - (w.boss.timer - 120) / 60.;
+                        w.boss.pos = w.boss.dash_src + (w.boss.dash_dst - w.boss.dash_src) * smoothstep(t);
+                    }
+                         if (w.boss.state == w.boss.dash ) Next(w.boss.aiming_d2, 90);
+                    else if (w.boss.state == w.boss.dash2) Next(w.boss.aiming_d3, 90);
+                    else if (w.boss.state == w.boss.dash3) Next(w.boss.shooting_mines, 90);
+                    break;
+                  case w.boss.shooting_mines:
+                    w.boss.aim = 0;
+                    w.boss.open_wings = 0;
+                    if (w.boss.timer == 45)
+                    {
+                        Sounds::boss_mines(w.boss.pos);
+                        for (int i = 0; i < boss_mine_count; i++)
+                        {
+                            float a = f_pi / 2 + 2 * f_pi / boss_mine_count * i;
+                            fvec2 d = fvec2(std::cos(a), std::sin(a));
+                            HomingMine hm;
+                            hm.pos = w.boss.pos + d * boss_mine_offset;
+                            hm.vel = d * boss_mine_speed;
+                            hm.angle = a;
+                            w.homing_mine_list.push_back(hm);
+                        }
+                    }
+                    else if (w.boss.timer < 45)
+                    {
+                        for (int i = 0; i < 3; i++)
+                        {
+                            float a = Rand::Float(-f_pi, f_pi);
+                            float d = Rand::Float(0,12);
+                            fvec2 rv = fvec2(std::cos(a), std::sin(a));
+                            w.push_particle(4, 0.98, Rand::Int(5, 15), 50, w.boss.pos + rv * d, rv * 1.8 + fvec2(-rv.y,rv.x)*Rand::Float(-0.3,0.3));
+                        }
+                    }
+                    Next(w.boss.charging, 240);
+                    break;
+                  case w.boss.charging:
+                    if (w.boss.timer == 1)
+                    {
+                        Sounds::boss_charge(w.boss.pos);
+                        w.boss.open_core = 1;
+                    }
+                    if (w.boss.was_hit && w.boss.open_core && w.boss.core_offset > boss_core_shell_max/2)
+                    {
+                        w.boss.hp--;
+                        w.boss.timer = 230;
+                        if (w.boss.hp > 0)
+                        {
+                            Sounds::boss_hit(w.boss.pos);
+                            for (int i = 0; i < 80; i++)
+                            {
+                                float a = Rand::Float(-f_pi, f_pi);
+                                float d = Rand::Float(20,25);
+                                fvec2 rv = fvec2(std::cos(a), std::sin(a));
+                                w.push_particle(7, 0.98, Rand::Int(5, 15), 50, w.boss.pos + rv * d, rv * Rand::Float(0.1,0.8) + fvec2(-rv.y,rv.x)*Rand::Float(-0.1,0.1));
+                            }
+                        }
+                        else
+                        {
+                            w.boss.dead = 1;
+                            w.goal_exists = 1;
+                            Sounds::boss_death(w.boss.pos);
+                            for (int i = 0; i < 100; i++)
+                            {
+                                float a = Rand::Float(-f_pi, f_pi);
+                                float d = Rand::Float(0,34);
+                                fvec2 rv = fvec2(std::cos(a), std::sin(a));
+                                w.push_particle(4, 0.98, Rand::Int(-30, -20), 50, w.boss.pos + rv * d, rv * Rand::Float(0.1,4.4) + fvec2(-rv.y,rv.x)*Rand::Float(-0.1,0.1));
+                                w.push_particle(0, 0.98, Rand::Int(-20, -10), 50, w.boss.pos + rv * d, rv * Rand::Float(0.1,5.4) + fvec2(-rv.y,rv.x)*Rand::Float(-0.3,0.3));
+                            }
+                        }
+                    }
+                    if (w.boss.timer == 230)
+                        w.boss.open_core = 0;
+                    for (int i = 0; i < iround(2 * w.boss.core_offset / float(boss_core_shell_max)); i++)
+                    {
+                        float a = Rand::Float(-f_pi, f_pi);
+                        float d = Rand::Float(32,42);
+                        fvec2 rv = fvec2(std::cos(a), std::sin(a));
+                        w.push_particle(4, 0.98, Rand::Int(0, 5), 50, w.boss.pos + rv * d, -rv);
+                    }
+                    Next(w.boss.waiting, 240);
+                    break;
+                }
+
+                w.boss.was_hit = 0;
+
+                if (!w.p.dead)
+                    w.boss.timer++;
+            }
+            else
+                w.boss.dead++;
         }
 
         { // Camera
@@ -1185,6 +1540,18 @@ int main(int, char **)
             if (!w.p.hc && !w.p.vc && (w.p.vel.len() < min_speed)) // Set speed to 0 if too small
                 w.p.vel = fvec2(0,0);
 
+            { // Reaching the goal
+                if (!w.p.dead && w.goal_exists && (w.p.pos - w.boss.home).len() < player_rad)
+                {
+                    w.goal_exists = 0;
+                    Sounds::goal({0,0}).relative();
+                    Tiles::solid[Tiles::door_boss] = 0;
+                    Tiles::info[Tiles::door_boss] = Tiles::Info::invis();
+                    ending_time = ts.ticks;
+                    w.fin = 1;
+                    w.p.trash.clear();
+                }
+            }
 
             { // Shooting
                 if (!w.p.dead && mouse.left.down() && w.p.laser_cd == 0)
@@ -1212,17 +1579,17 @@ int main(int, char **)
                         if (e == Tiles::one_way_passage_r) hit_one_way_r = 1;
                         if (e == Tiles::one_way_passage_d) hit_one_way_d = 1;
                     }
-                    if (hit_one_way && w.p.vel.y > -1) // One way passage interaction
+                    if (hit_one_way && w.p.vel.y > -1 && !w.fin) // One way passage interaction
                     {
                         fvec2 dst_vel = fvec2(0,-1);
                         w.p.vel += (dst_vel - w.p.vel) * 0.15;
                     }
-                    if (hit_one_way_d && w.p.vel.y < 1)
+                    if (hit_one_way_d && w.p.vel.y < 1 && !w.fin)
                     {
                         fvec2 dst_vel = fvec2(0,1);
                         w.p.vel += (dst_vel - w.p.vel) * 0.15;
                     }
-                    if (hit_one_way_r && w.p.vel.x < 1)
+                    if (hit_one_way_r && w.p.vel.x < 1 && !w.fin)
                     {
                         fvec2 dst_vel = fvec2(1,0);
                         w.p.vel += (dst_vel - w.p.vel) * 0.15;
@@ -1301,6 +1668,7 @@ int main(int, char **)
                             w.p.pos = w.checkpoint_list[w.active_checkpoint];
                             w.p.vel = fvec2(0);
                         }
+                        w.extra_exp = w.extra_exp_max;
                     }
 
                 }
@@ -1311,6 +1679,14 @@ int main(int, char **)
             w.extra_exp = max(0, w.extra_exp + exposure_step);
             if (w.p.laser_cd > 0)
                 w.p.laser_cd--;
+            if (w.fin > 0)
+            {
+                w.fin++;
+                if (w.fin > 180 && Keys::escape.pressed())
+                    Program::Exit();
+            }
+            if (starting_time != 0)
+                starting_screen_alpha = max(starting_screen_alpha - 0.015, 0);
         }
     };
     auto Render = [&]
@@ -1323,6 +1699,41 @@ int main(int, char **)
         // Map background
         w.map.Render(2);
 
+        { // Boss
+            // Core
+            if (!w.boss.dead)
+                r.Quad_f(w.boss.pos, boss_z+30, ivec2(50)).tex(ivec2(336,376)).center().rotate(w.boss.rot);
+
+            // Shell
+            r.Quad_f(w.boss.pos, boss_z, ivec2(96/2,96)).tex(ivec2(336,279)).center(fvec2(96/2,96/2)).rotate(w.boss.rot).translate_f(fvec2(-w.boss.core_offset,0));
+            r.Quad_f(w.boss.pos, boss_z, ivec2(96/2,96)).tex(ivec2(336+96/2,279)).center(fvec2(0,96/2)).rotate(w.boss.rot).translate_f(fvec2(w.boss.core_offset,0));
+
+            // HP indicator
+            for (int i = 0; i < w.boss.hp; i++)
+                r.Quad(w.boss.pos, 100, ivec2(9)).tex(ivec2(60,168)+1).center().beta(0).rotate(w.boss.rot).translate_f(fvec2(-boss_hp_offset - i * boss_hp_gap - w.boss.core_offset,0));
+
+            // Wings
+            r.Quad_f(w.boss.pos, boss_z, ivec2(44,157)).tex(ivec2(433,279)).center(fvec2(-4-w.boss.core_offset,-10-w.boss.wing_offset)).rotate(w.boss.rot - w.boss.wing_an_s + f_pi/2);
+            r.Quad_f(w.boss.pos, boss_z, ivec2(44,157)).tex(ivec2(433,279)).center(fvec2(-4-w.boss.core_offset,-10-w.boss.wing_offset)).rotate(w.boss.rot + w.boss.wing_an_s + f_pi/2).scale(ivec2(-1,1));
+            if (w.boss.dead)
+            {
+                float t = 1 - abs(w.boss.dead - 70) / 70.;
+                if (t > 0)
+                {
+                    t = smoothstep(t);
+                    w.push_light(fvec3(1,0,0.5) * t * 200000, w.boss.pos.to_vec3(light_z), t * 24);
+                }
+            }
+        }
+
+        { // Goal
+            if (w.goal_exists)
+            {
+                float t = clamp(w.boss.dead / 90. - 1, 0,1);
+                r.Quad(w.boss.home + fvec2(Rand::Float(-0.7,0.7),Rand::Float(-0.7,0.7)), 100, ivec2(11)).tex(ivec2(72,168)).center().beta(0).alpha(t);
+                w.push_light(fvec3(1,0.8,0.6) * 1000 * t, w.boss.home.to_vec3(light_z));
+            }
+        }
 
         { // Homing mines
             for (const auto &it : w.homing_mine_list)
@@ -1352,7 +1763,7 @@ int main(int, char **)
                 if (!w.p.dead)
                 {
                     for (const auto &it : w.p.trash)
-                        r.Quad_f(w.p.pos, player_z - 10, ivec2(14)).tex(ivec2(272,215 + 14 * it.is_key)).center().rotate(w.p.rot).translate(it.offset).rotate(it.vis_angle);
+                        r.Quad_f(w.p.pos, player_z - 10, ivec2(14)).tex(ivec2(272,215 + 14 * it.is_key)).center().rotate(w.p.rot).translate_f(it.offset).rotate(it.vis_angle);
                 }
             }
 
@@ -1418,8 +1829,53 @@ int main(int, char **)
                 w.push_light(fvec3(0,0.7,1) * 70000 * s, w.p.pos.to_vec3(light_z), s * 30);
             }
             else if (w.p.dead > death_light_2_start)
-                w.push_light(fvec3(2,0.1,1) * (w.p.dead - death_light_2_start) / float(death_light_2_t_cap) * death_light_2_fac, w.cam_pos.to_vec3(light_z), (w.p.dead - death_light_2_start) / float(death_light_2_t_cap) * 30);
+            {
+                int t = min(w.p.dead - death_light_2_start, death_light_2_t_cap);
+                w.push_light(fvec3(2,0.1,1) * t / float(death_light_2_t_cap) * death_light_2_fac, w.cam_pos.to_vec3(light_z), t / float(death_light_2_t_cap) * 30);
+            }
         }
+
+        // Ending
+        if (w.fin > 60)
+        {
+            constexpr int stats_gap = 12;
+            bool alt = Rand::Float(0,1) < 0.1;
+            float t = clamp((w.fin - 60) / 120., 0, 1);
+            r.Quad_f(w.cam_pos, 0, ivec2(200,86)).tex({0,336+86*alt}).beta(0).alpha(t).center().rotate(w.cam_rot).translate(ivec2(0,-20));
+            float t2 = clamp((w.fin - 120) / 120., 0, 1);
+            r.Quad_f(w.cam_pos, 0, ivec2(200,50)).tex({0,508}).beta(0).alpha(t2 * (alt ? 0.2 : 1)).center().rotate(w.cam_rot).translate(ivec2(-stats_gap,100));
+
+            auto Text = [&](std::string str, fvec2 pos)
+            {
+                static const std::string font = "0123456789:.";
+                for (char ch : str)
+                {
+                    auto index = font.find_first_of(ch);
+                    if (index != str.npos)
+                    {
+                        r.Quad_f(w.cam_pos, 0, ivec2(8,16)).tex({int(8*index),559}).beta(0).alpha(t2 * (alt ? 0.2 : 1)).center(fvec2(0,8)).rotate(w.cam_rot).translate(pos);
+                    }
+                    pos.x += 11;
+                }
+            };
+
+            Text(Str(death_counter), fvec2(stats_gap, 86));
+            int ticks = ending_time - starting_time;
+            int secs = ticks / 60;
+            int mins = secs / 60;
+            int hours = mins / 60;
+            ticks %= 60;
+            secs %= 60;
+            mins %= 60;
+            std::string ms_str = Str(iround(ticks / 60. * 1000));
+            while (ms_str.size() < 3)
+                ms_str = '0' + ms_str;
+            Text(Str(hours, ':', mins, ':', secs, '.', ms_str), fvec2(stats_gap, 86+24));
+        }
+
+        // Start screen
+        if (starting_screen_alpha > 0)
+            r.Quad_f(w.cam_pos, 0, screen_sz).tex({1024-screen_sz.x,0}).beta(0).alpha(smoothstep(clamp(starting_screen_alpha,0,1)) * 0.04).center().rotate(w.cam_rot);
 
         { // Transitions
             r.Exposure(-w.extra_exp);
