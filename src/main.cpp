@@ -76,7 +76,7 @@ namespace Sounds
 void Init()
 {
     Events::SetErrorHandlers();
-    win.Create("Ni by HolyBlackCat", screen_sz * 2, Window::Settings{}.Resizable(1).MinSize(screen_sz));
+    win.Create("Ni by HolyBlackCat | v2", screen_sz * 2, Window::Settings{}.Resizable(1).MinSize(screen_sz));
     win.Fullscreen(1);
 
     Graphics::Image img_lookup   ("assets/lookup.gnp"),
@@ -468,6 +468,8 @@ float starting_screen_alpha = 2;
 
 struct World
 {
+    inline static constexpr int trash_fire_particles = 20;
+
     struct Player
     {
         fvec2 pos = fvec2(0);
@@ -547,6 +549,15 @@ struct World
         if (!p.dead && !fin)
         {
             p.dead = 1;
+            fmat2 m = fmat2::rotate2D(p.rot);
+            for (const auto &it : p.trash)
+            {
+                for (int i = 0; i < trash_fire_particles; i++) // Breaking particles
+                {
+                    float a = Rand::Float(-f_pi, f_pi);
+                    push_particle(3, 0.97, Rand::Int(-5, 5), 30, p.pos + m /mul/ (it.offset + fvec2(Rand::Float(-6,6),Rand::Float(-6,6))), fvec2(std::cos(a), std::sin(a)) * Rand::Float(0,0.5));
+                }
+            }
             death_counter++;
         }
     }
@@ -985,7 +996,7 @@ int main(int, char **)
                     if (!des_quiet)
                     {
                         Sounds::trash_block_breaks(it->pos);
-                        for (int i = 0; i < 50; i++) // Breaking particles
+                        for (int i = 0; i < World::trash_fire_particles; i++) // Breaking particles
                         {
                             float a = Rand::Float(-f_pi, f_pi);
                             w.push_particle(3, 0.97, Rand::Int(-5, 5), 30, it->pos + fvec2(Rand::Float(-6,6),Rand::Float(-6,6)), fvec2(std::cos(a), std::sin(a)) * Rand::Float(0,0.5));
