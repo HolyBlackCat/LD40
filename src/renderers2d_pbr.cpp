@@ -15,7 +15,7 @@ void main()
     v_depth = a_pos.z;
     v_tex_pos = a_tex_pos / u_tex_size;
     v_alpha_beta = a_alpha_beta;
-    v_normal_mat = mat2(a_normal_mat);
+    v_normal_mat = mat2(a_normal_mat.x, a_normal_mat.y, a_normal_mat.z, a_normal_mat.w);
 })";
         const char *const f = R"(
 VARYING(float, depth)
@@ -90,7 +90,7 @@ void main()
     v_sspos = gl_Position.xy / 2. + .5;
     v_depth = a_pos.z;
     v_tex_pos = a_tex_pos / u_tex_size;
-    v_normal_mat = mat2(a_normal_mat);
+    v_normal_mat = mat2(a_normal_mat.x, a_normal_mat.y, a_normal_mat.z, a_normal_mat.w);
 })";
         const char *const f = R"(
 VARYING(vec2, sspos)
